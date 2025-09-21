@@ -1,0 +1,2885 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Panki System</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- PDF.js library for client-side PDF text extraction -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.min.js"></script>
+    <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.worker.min.js`;
+    </script>
+    <style>
+        body { font-family: 'Poppins', sans-serif; }
+        html, body {
+            height: 100%;
+            margin: 0;
+            overflow-x: hidden;
+        }
+        #app-container {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        /* This rule was causing a specificity issue where the #flashcard-viewer ID selector
+           overrode the .hidden class. By using :not(.hidden), we ensure these styles
+           only apply when the flashcard viewer is intentionally made visible. */
+        #flashcard-viewer:not(.hidden), #profile-view:not(.hidden) {
+            display: flex;
+            flex-direction: column;
+            flex-grow: 1; /* Make the view fill the available space inside app-container */
+        }
+        #flashcard-viewer-content {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+        }
+         #main-content {
+             flex-grow: 1;
+             display: flex;
+             flex-direction: column;
+         }
+
+        /* --- Card Flip Animation --- */
+        .card-container { 
+            perspective: 1000px;
+        }
+        .card-inner { 
+            position: relative;
+            width: 100%; 
+            height: 100%; 
+            transition: transform 0.6s; 
+            transform-style: preserve-3d; 
+        }
+        .card-container.is-flipped .card-inner { 
+            transform: rotateY(180deg); 
+        }
+        .card-face { 
+            position: absolute; 
+            width: 100%; 
+            height: 100%; 
+            -webkit-backface-visibility: hidden; 
+            backface-visibility: hidden; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            padding: 2rem 2rem 6rem 2rem;
+            text-align: center; 
+            overflow-y: auto; 
+        }
+        .card-back { 
+            transform: rotateY(180deg); 
+        }
+        
+        .swipe-overlay {
+            position: absolute;
+            inset: 0;
+            border-radius: 1rem; /* match card rounding */
+            opacity: 0;
+            transition: opacity 0.2s ease-in-out;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2rem;
+            font-weight: bold;
+            color: white;
+            pointer-events: none; /* Important for clicks to pass through */
+        }
+
+        /* --- Utility Classes --- */
+        .spinner { border: 4px solid rgba(0, 0, 0, 0.1); width: 20px; height: 20px; border-radius: 50%; border-left-color: #4f46e5; animation: spin 1s ease infinite; }
+        .spinner-light { border-color: rgba(255, 255, 255, 0.3); border-left-color: #fff; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        #stars-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 0; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+
+    <!-- Authentication Screen (Replaces Welcome Screen) -->
+    <div id="auth-screen" class="fixed inset-0 bg-gray-100 z-50 flex flex-col items-center justify-center overflow-hidden">
+        <canvas id="stars-canvas"></canvas>
+        <div class="relative z-10 text-center bg-white p-8 rounded-2xl shadow-xl max-w-sm w-full mx-4">
+              <div>
+                  <h1 class="text-3xl font-extrabold" style="color: #4f46e5;">Panki FlashCards</h1>
+                  <p id="auth-title" class="text-xl text-black font-medium mt-2">Sign in to continue</p>
+              </div>
+              <div id="auth-error" class="text-red-500 text-sm my-2 h-4"></div>
+              <button id="google-signin-btn" class="mt-6 w-full bg-white hover:bg-gray-100 text-gray-700 font-semibold py-3 px-4 rounded-lg border border-gray-300 flex items-center justify-center gap-2 transition duration-300">
+                  <svg class="w-5 h-5" viewBox="0 0 48 48"><defs><path id="a" d="M44.5 20H24v8.5h11.8C34.7 33.9 30.1 37 24 37c-7.2 0-13-5.8-13-13s5.8-13 13-13c3.1 0 5.9 1.1 8.1 2.9l6.4-6.4C34.6 4.1 29.6 2 24 2 11.8 2 2 11.8 2 24s9.8 22 22 22c11 0 21-8 21-22 0-1.3-.2-2.7-.5-4z"/></defs><clipPath id="b"><use xlink:href="#a" overflow="visible"/></clipPath><path clip-path="url(#b)" fill="#FBBC05" d="M0 37V11l17 13z"/><path clip-path="url(#b)" fill="#EA4335" d="M0 11l17 13 7-6.1L48 14V0H0z"/><path clip-path="url(#b)" fill="#34A853" d="M0 37l30-23 7.9 1L48 0v48H0z"/><path clip-path="url(#b)" fill="#4285F4" d="M48 48L17 24l-4-3 35-10z"/></svg>
+                  <span>Sign in with Google</span>
+              </button>
+              <p id="dev-skip-signin" class="text-xs text-gray-400 mt-4 cursor-pointer hover:underline">Sign in Anonymously</p>
+        </div>
+    </div>
+
+    <!-- Main App Container (Initially Hidden) -->
+    <div id="app-container" class="w-full max-w-5xl mx-auto hidden p-4 sm:p-6">
+        <!-- Folder View -->
+        <div id="folder-view"></div>
+        <!-- Deck View -->
+        <div id="deck-view" class="hidden"></div>
+        <!-- Flashcard Viewer -->
+        <div id="flashcard-viewer" class="hidden"></div>
+        <!-- Profile View -->
+        <div id="profile-view" class="hidden"></div>
+    </div>
+
+    <!-- Modal for adding folders/decks and showing Gemini results -->
+    <div id="modal-container" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden p-4">
+        <div id="modal-content" class="bg-white p-6 sm:p-8 rounded-2xl shadow-xl max-w-lg w-full mx-4"></div>
+    </div>
+
+    <script type="module">
+        // --- IMPORTS ---
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, onAuthStateChanged, signOut, GoogleAuthProvider, signInWithPopup, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc, updateDoc, getDocs, query, where, writeBatch, getDoc, setLogLevel, serverTimestamp, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // --- DOM ELEMENTS ---
+        const authScreen = document.getElementById('auth-screen');
+        const appContainer = document.getElementById('app-container');
+        const folderView = document.getElementById('folder-view');
+        const deckView = document.getElementById('deck-view');
+        const flashcardViewer = document.getElementById('flashcard-viewer');
+        const profileView = document.getElementById('profile-view');
+        const modalContainer = document.getElementById('modal-container');
+        const modalContent = document.getElementById('modal-content');
+
+        // Auth form elements
+        const authError = document.getElementById('auth-error');
+        const googleSignInBtn = document.getElementById('google-signin-btn');
+        const devSkipSignInBtn = document.getElementById('dev-skip-signin');
+        
+        // --- APP STATE & CONFIG ---
+        let cards = [], decks = [], folders = [], publicFolders = [], publicDecks = [];
+        let currentDeckId = null, currentFolderId = null, currentIndex = 0;
+        let currentUserId = null;
+        let unsubscribeFolders = () => {}, unsubscribeDecks = () => {}, unsubscribeCards = () => {};
+        let unsubscribePublicFolders = () => {}, unsubscribePublicDecks = () => {};
+        let chatHistory = [];
+        let dueCards = [];
+        let studySessionStartTime = null;
+        let sessionStats = {};
+        
+        const apiKey = ""; // API key is automatically managed by the environment.
+        const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+        const GEMINI_PRO_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+
+        // --- FIREBASE SETUP ---
+        let db, auth;
+        // Use environment variables for Firebase config and App ID, with local fallbacks.
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'panki-local-dev'; 
+        
+        try {
+            const firebaseConfig = typeof __firebase_config !== 'undefined' 
+                ? JSON.parse(__firebase_config)
+                : { // --- FALLBACK CONFIG FOR LOCAL DEVELOPMENT ONLY ---
+                    apiKey: "AIzaSyC_iwz8SOaGoIMfPCPA7auvi0uidpAjgXs",
+                    authDomain: "pan-flashcards.firebaseapp.com",
+                    projectId: "pan-flashcards",
+                    storageBucket: "pan-flashcards.appspot.com",
+                    messagingSenderId: "648145823972",
+                    appId: "1:648145823972:web:e5374f21219fc8e90b24f1"
+                  };
+
+            const app = initializeApp(firebaseConfig);
+            db = getFirestore(app);
+            // Add log level for better debugging, especially in local environments
+            if (typeof __app_id === 'undefined') {
+                 setLogLevel('debug');
+            }
+            auth = getAuth(app);
+            initializeAuth(); // Initialize authentication flow.
+        } catch (e) {
+            console.error("Firebase initialization failed:", e);
+            showAlertModal("Could not connect to the backend service. Please check your internet connection and Firebase configuration.", "error");
+        }
+        
+        // --- AUTHENTICATION ---
+        async function initializeAuth() {
+            // If a custom token is provided by the environment, use it to sign in.
+            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                 try {
+                     await signInWithCustomToken(auth, __initial_auth_token);
+                 } catch (error) {
+                     console.error("Custom token sign-in failed:", error);
+                     // Fallback to manual sign-in if token is invalid
+                 }
+            }
+            // If no token, the onAuthStateChanged listener will see no user, and the sign-in screen will remain.
+        }
+
+        onAuthStateChanged(auth, async (user) => {
+            if (user) {
+                // User is signed in
+                currentUserId = user.uid;
+                authScreen.classList.add('hidden');
+                appContainer.classList.remove('hidden');
+                setupPublicListeners(); // Setup public listeners now that we have auth
+                await initializeAppData(currentUserId);
+            } else {
+                // User is signed out
+                currentUserId = null;
+                authScreen.classList.remove('hidden');
+                appContainer.classList.add('hidden');
+                // Clear local data and unsubscribe from ALL listeners
+                folders = [];
+                decks = [];
+                cards = [];
+                publicFolders = [];
+                publicDecks = [];
+                unsubscribeFolders();
+                unsubscribeDecks();
+                unsubscribeCards();
+                unsubscribePublicFolders();
+                unsubscribePublicDecks();
+            }
+        });
+
+        async function initializeAppData(userId) {
+            if (!userId) return;
+            const userDecksRef = collection(db, `artifacts/${appId}/users/${userId}/decks`);
+            try {
+                 // Initialize user profile
+                const profileRef = doc(db, `artifacts/${appId}/users/${userId}/profile`, 'data');
+                const profileSnap = await getDoc(profileRef);
+                if (!profileSnap.exists()) {
+                    await setDoc(profileRef, {
+                        streak: 0,
+                        lastStudiedDate: null,
+                        totalReviews: 0,
+                        totalStudyTime: 0
+                    });
+                }
+                const decksSnapshot = await getDocs(userDecksRef);
+                if (decksSnapshot.empty) {
+                    await createInitialDeck(userId);
+                }
+                await createOwnerSpecificContent(userId); // Add owner-specific content
+                setupUserListeners(userId);
+            } catch (error) {
+                console.error("Error initializing app data:", error);
+            }
+        }
+
+        async function createOwnerSpecificContent(userId) {
+            const ownerUID = 'rQAEiO6Nj3XM6kn7HpaL45ok6ki2';
+            if (userId === ownerUID) {
+                const userFoldersRef = collection(db, `artifacts/${appId}/users/${userId}/folders`);
+                const newFolderName = " Post-Midterm | 3.1 ";
+                const oldFolderName = "3.1";
+                let folderId = null;
+
+                // --- Find or Create the Folder ---
+                const newNameQuery = query(userFoldersRef, where("name", "==", newFolderName));
+                const newNameSnapshot = await getDocs(newNameQuery);
+
+                if (!newNameSnapshot.empty) {
+                    folderId = newNameSnapshot.docs[0].id;
+                } else {
+                    const oldNameQuery = query(userFoldersRef, where("name", "==", oldFolderName));
+                    const oldNameSnapshot = await getDocs(oldNameQuery);
+
+                    if (!oldNameSnapshot.empty) {
+                        const folderToUpdateRef = oldNameSnapshot.docs[0].ref;
+                        await updateDoc(folderToUpdateRef, { name: newFolderName });
+                        folderId = folderToUpdateRef.id;
+                    } else {
+                        const newFolderRef = await addDoc(userFoldersRef, { name: newFolderName });
+                        folderId = newFolderRef.id;
+                    }
+                }
+
+                if (!folderId) {
+                    console.error("Could not obtain folder ID for owner content.");
+                    return;
+                }
+
+                // --- Pre-generated decks and cards based on your uploaded files ---
+                const ownerDecksData = [
+                    {
+                        name: "Oncogenetics Fundamentals",
+                        cards: [
+                            { q: "Oncogenetics: The collection of disorders that share the common feature of uncontrolled cell growth is known as [...].", a: "Cancer" },
+                            { q: "Oncogenetics: A mass of cells resulting from uncontrolled cell growth is termed a [...].", a: "Neoplasm" },
+                            { q: "Oncogenetics: The process of cancer development is called [...].", a: "Carcinogenesis" },
+                            { q: "Genetics: An alteration in the DNA sequence is known as a [...].", a: "Mutation" },
+                            { q: "Oncogenetics: The primary basis of carcinogenesis is the genetic alteration of cell [...] systems.", a: "Regulatory" },
+                            { q: "Genetics: Mutations that occur after fertilization in somatic cells are called [...] mutations.", a: "Somatic (or acquired)" },
+                            { q: "Genetics: A somatic mutation is localized to a specific site or organ and is not [...].", a: "Inherited" },
+                            { q: "Genetics: Somatic mutations can be caused by natural errors in DNA replication or by DNA damage from outside influences like [...], carcinogenic substances, or viruses.", a: "Radiation" },
+                            { q: "Genetics: Mutations that occur in the sperm or ovum before fertilization are called [...] mutations.", a: "Germline (or inherited)" },
+                            { q: "Genetics: A germline mutation is present in [...] cells of the body.", a: "All" },
+                            { q: "Genetics: Germline mutations can be transmitted from one [...] to the next.", a: "Generation" },
+                            { q: "Genetics: The probability of expressing a phenotype, given that an individual has inherited a predisposing genotype, is called [...].", a: "Penetrance" },
+                            { q: "Genetics: If the probability of expressing a phenotype is less than 1.0 (or 100%), the genotype is said to have [...] penetrance.", a: "Incomplete (or reduced)" },
+                            { q: "Genetics: A person who inherits a mutant allele for retinoblastoma has approximately a [...]% chance of developing tumors, which is an example of incomplete penetrance.", a: "90" },
+                            { q: "Genetics: An individual who has an affected parent and affected children, and therefore must carry the mutation even if they are unaffected, is called an [...] carrier.", a: "Obligate" },
+                            { q: "Oncogenetics: A normal gene whose protein product is involved in the regulation of cell growth is known as a [...].", a: "Proto-oncogene" },
+                            { q: "Oncogenetics: When a proto-oncogene is altered by a mutation, it can become a cancer-causing [...].", a: "Oncogene" },
+                            { q: "Oncogenetics: Proto-oncogenes are involved in four basic regulators of cell growth: growth factors, growth factor receptors, [...] molecules, and nuclear transcription factors.", a: "Signal transduction" },
+                            { q: "Oncogenetics: Most oncogenes act as [...] gain-of-function mutations.", a: "Dominant" },
+                            { q: "Oncogenetics: A gain-of-function mutation means that only [...] mutated allele is enough for the disease to manifest.", a: "One" },
+                            { q: "Oncogenetics: Oncogenes primarily undergo [...] mutations that lead to sporadic cancers, rather than germline mutations.", a: "Somatic" },
+                            { q: "Oncogenetics: In the 'car analogy,' oncogenes are like the [...] of the cell cycle.", a: "Accelerator" },
+                            { q: "Oncogenetics: Genes that encode negative regulators of growth and proliferation, serving as a cell-cycle brake, are called [...].", a: "Tumor suppressor genes (TSGs)" },
+                            { q: "Oncogenetics: In the 'car analogy,' tumor suppressor genes are like the [...] of the cell cycle.", a: "Brakes" },
+                            { q: "Oncogenetics: TSG mutations are [...] of function mutations, where both copies of the gene must be inactivated for uncontrolled proliferation to occur.", a: "Loss" },
+                            { q: "Oncogenetics: The RB1 gene is a tumor suppressor gene that acts as a master brake on the cell cycle by binding to the [...] transcription complex.", a: "E2F" },
+                            { q: "Oncogenetics: The model stating that two mutational events are required to inactivate a tumor suppressor gene is called the [...] model.", a: "Two-hit" },
+                            { q: "Genetics: In familial retinoblastoma, the 'first hit' is a [...] mutation, while the 'second hit' is a [...] mutation.", a: "Germline, somatic" },
+                            { q: "Genetics: In sporadic retinoblastoma, both 'hits' are [...] mutations that must occur in the same cell.", a: "Somatic" },
+                            { q: "Oncogenetics: At the level of the individual, an inherited TSG mutation is considered [...] because inheriting one defective allele highly predisposes the person to cancer.", a: "Dominant" },
+                            { q: "Oncogenetics: At the level of the cell, a TSG mutation is considered [...] because one functioning copy is still sufficient to control cell growth.", a: "Recessive" }
+                        ]
+                    },
+                    {
+                        name: "Oncogenetics 2",
+                        cards: [
+                            { q: "Clinical Practice: Recognizing if a cancer is hereditary is important because it can change the recommended [...].", a: "Therapy" },
+                            { q: "Clinical Practice: A patient with HNPCC (Lynch syndrome) may require a [...] colectomy, whereas a patient with sporadic colon cancer may only need a localized resection.", a: "Subtotal" },
+                            { q: "Clinical Practice: Recognizing hereditary cancer is crucial for implementing preventative periodic [...] for other associated cancers.", a: "Screening" },
+                            { q: "Clinical Practice: A female patient with HNPCC-associated colon cancer should also be screened for [...] cancer.", a: "Endometrial" },
+                            { q: "Clinical Practice: Prophylactic surgery, like a colectomy in patients with FAP, is a form of [...] for hereditary cancer syndromes.", a: "Prevention" },
+                            { q: "Clinical Practice: A key characteristic for recognizing hereditary cancer is a relatively [...] age at diagnosis for that specific cancer type.", a: "Young" },
+                            { q: "Clinical Practice: The presence of [...] primary tumors in a single patient is a strong indicator of hereditary cancer.", a: "Multiple" },
+                            { q: "Clinical Practice: The presence of multiple precursor lesions, such as numerous adenomatous bowel polyps, suggests a [...] cancer syndrome.", a: "Hereditary" },
+                            { q: "Clinical Practice: The development of breast cancer in [...] is an important characteristic for recognizing hereditary cancer.", a: "Men" },
+                            { q: "Genetics: The probability that a person will develop a certain type of cancer during their entire life is known as the [...] risk.", a: "Lifetime (or cumulative)" },
+                            { q: "Genetics: The risk of a tumor in an exposed group compared to the risk in an unexposed (control) group is known as the [...] risk.", a: "Relative" },
+                            { q: "Genetics: DNA testing performed on healthy family members who may be predisposed to a hereditary cancer is called [...] DNA testing.", a: "Presymptomatic (or predictive)" },
+                            { q: "Genetics: Presymptomatic DNA testing is generally not performed on individuals under [...] years of age, unless there are likely medical consequences at a younger age.", a: "18" },
+                            { q: "Genetics: A well-known example of performing predictive DNA testing in children is for MEN2, which may indicate a preventative [...] between 4-6 years of age.", a: "Thyroidectomy" },
+                            { q: "Genetics: The 'right not to know' refers to a person's choice to decline genetic testing, even when a mutation is known to be in the family.", a: "Right not to know" },
+                            { q: "Genetics: The situation where parents do not wish to undergo DNA testing but their children do is referred to as the [...] problem.", a: "Sandwich" },
+                            { q: "HBOC: Hereditary Breast and Ovarian Cancer is an autosomal [...] condition with incomplete penetrance.", a: "Dominant" },
+                            { q: "HBOC: A patient with breast cancer diagnosed at less than [...] years of age should be considered for referral and DNA testing.", a: "35" },
+                            { q: "HBOC: The presence of both breast cancer and [...] cancer in the same patient or on the same side of the family is a key indicator of HBOC.", a: "Ovarian" },
+                            { q: "HBOC: Germline mutations in the [...] and [...] genes are most commonly associated with Hereditary Breast and Ovarian Cancer.", a: "BRCA1, BRCA2" },
+                            { q: "HNPCC: The two main types of hereditary colorectal cancer are Familial Adenomatous Polyposis (FAP) and [...].", a: "Hereditary Non-Polyposis Colorectal Cancer (HNPCC)" },
+                            { q: "HNPCC: HNPCC is also known as [...] Syndrome.", a: "Lynch" },
+                            { q: "HNPCC: HNPCC is caused by inherited mutations in genes responsible for DNA [...] repair.", a: "Mismatch" },
+                            { q: "HNPCC: The most important DNA mismatch repair genes implicated in HNPCC are MSH2, MLH1, and [...].", a: "MSH6" },
+                            { q: "HNPCC: The Amsterdam II criteria are a clinical checklist used to identify families who might have [...].", a: "HNPCC (Lynch Syndrome)" },
+                            { q: "HNPCC: The '3-2-1 Rule' of the Amsterdam criteria requires at least [...] relatives with an HNPCC-associated cancer.", a: "3" },
+                            { q: "HNPCC: The '3-2-1 Rule' of the Amsterdam criteria requires the cancer to affect at least [...] successive generations.", a: "2" },
+                            { q: "HNPCC: The '3-2-1 Rule' of the Amsterdam criteria requires at least [...] of the relatives to be diagnosed before age 50.", a: "1" },
+                            { q: "HNPCC: A key feature of HNPCC tumors is [...] instability, where the length of short, repetitive DNA segments varies between cells.", a: "Microsatellite" },
+                            { q: "HNPCC: An immunohistochemistry test on a tumor that shows loss of MSH2 or MSH6 proteins is a strong indicator of [...].", a: "HNPCC" }
+                        ]
+                    },
+                    {
+                        name: "Bone Biology 1&2",
+                        cards: [
+                            { q: "Physiology: The musculoskeletal system is composed of bones, joints, muscles, ligaments, tendons, and [...].", a: "Cartilages" },
+                            { q: "Physiology: A primary function of bone is to produce blood cells, a process known as [...].", a: "Hematopoiesis" },
+                            { q: "Physiology: Bones act as a major storage reservoir for minerals, especially calcium and [...].", a: "Phosphate" },
+                            { q: "Anatomy: The shaft of a long bone is called the [...].", a: "Diaphysis" },
+                            { q: "Anatomy: The ends of a long bone are called the [...].", a: "Epiphysis" },
+                            { q: "Anatomy: The region of a long bone located between the diaphysis and the epiphysis is the [...].", a: "Metaphysis" },
+                            { q: "Physiology: The organic matrix phase of bone is primarily composed of Type [...] collagen.", a: "I" },
+                            { q: "Physiology: The inorganic mineral phase of bone is mainly composed of a compound called [...].", a: "Calcium hydroxyapatite" },
+                            { q: "Histology: The four main cell types in bone are osteoblasts, osteocytes, osteoclasts, and [...] cells.", a: "Osteogenic" },
+                            { q: "Histology: The bone cell responsible for forming the bone matrix is the [...].", a: "Osteoblast" },
+                            { q: "Histology: Osteoblasts are derived from undifferentiated [...] stem cells.", a: "Mesenchymal" },
+                            { q: "Histology: The bone cell responsible for bone resorption (breakdown) is the [...].", a: "Osteoclast" },
+                            { q: "Physiology: Osteoclasts use the enzyme [...] to produce hydrogen ions, creating an acidic environment to dissolve bone.", a: "Carbonic anhydrase" },
+                            { q: "Histology: Osteoclasts are large, multinucleated cells that originate from the [...] lineage.", a: "Macrophage" },
+                            { q: "Histology: The most abundant cell in the mature skeleton, responsible for maintaining bone tissue, is the [...].", a: "Osteocyte" },
+                            { q: "Histology: Osteocytes are former [...] that have become trapped within the bone matrix they created.", a: "Osteoblasts" },
+                            { q: "Histology: The stem cells of bone are called [...] cells.", a: "Osteogenic" },
+                            { q: "Anatomy: The basic structural unit of compact bone is the [...], also known as the Haversian system.", a: "Osteon" },
+                            { q: "Anatomy: The central canal in an osteon that contains blood vessels and nerves is called the [...] canal.", a: "Haversian" },
+                            { q: "Histology: Mature, organized bone with an ordered, layered arrangement is called [...] bone.", a: "Lamellar" },
+                            { q: "Histology: Immature bone with a random, disorganized appearance of collagen fibers, often seen in fracture healing, is called [...] bone.", a: "Woven" },
+                            { q: "Anatomy: The dense, solid outer layer of bone is called [...] bone.", a: "Cortical (or compact)" },
+                            { q: "Anatomy: The porous, lattice-like inner bone tissue is called [...] bone.", a: "Cancellous (or spongy/trabecular)" },
+                            { q: "Anatomy: The connective tissue membrane that covers the outer surface of a bone is the [...].", a: "Periosteum" },
+                            { q: "Embryology: Bone, muscle, and the circulatory system all develop from the embryonic germ layer known as the [...].", a: "Mesoderm" },
+                            { q: "Embryology: The process of converting a cartilage model into bone is called [...] ossification.", a: "Endochondral" },
+                            { q: "Embryology: The direct conversion of mesenchymal tissue into bone, without a cartilage intermediate, is called [...] ossification.", a: "Intramembranous" },
+                            { q: "Embryology: Intramembranous ossification primarily occurs in the flat bones of the skull and the [...].", a: "Clavicle" },
+                            { q: "Anatomy: In a growing long bone, the plate of cartilage responsible for longitudinal growth is the [...] or growth plate.", a: "Physis" },
+                            { q: "Histology: The zone of the physis where chondrocytes are actively dividing and increasing in number is the zone of [...].", a: "Proliferation" },
+                            { q: "Histology: The zone of the physis where chondrocytes enlarge and mature is the zone of [...].", a: "Hypertrophy" },
+                            { q: "Histology: The zone of the physis where the cartilage matrix is mineralized and chondrocytes die is the zone of [...].", a: "Calcification" },
+                            { q: "Physiology: The increase in the diameter of a bone is called [...] growth.", a: "Appositional" },
+                            { q: "Physiology: The continuous, balanced process of bone resorption by osteoclasts and bone formation by osteoblasts is known as bone [...].", a: "Remodeling (or turnover)" },
+                            { q: "Physiology: Peak bone mass in females is typically reached between [...] years of age.", a: "20-30" },
+                            { q: "Physiology: The rapid decrease in bone mass in females after age 50 is primarily due to the loss of the hormone [...] during menopause.", a: "Estrogen" },
+                            { q: "Pathology: A condition where bone matrix and collagen are reduced, leading to decreased bone density, is called [...].", a: "Osteoporosis" },
+                            { q: "Pathology: A condition caused by a Vitamin D deficiency where the bone matrix is normal but mineralization is impaired, leading to softened bones, is called [...].", a: "Osteomalacia" },
+                            { q: "Endocrinology: The hormone secreted by the parathyroid glands in response to low blood calcium is [...].", a: "Parathyroid hormone (PTH)" },
+                            { q: "Endocrinology: PTH acts to [...] blood calcium levels.", a: "Increase" },
+                            { q: "Endocrinology: The hormone secreted by the C-cells of the thyroid gland in response to high blood calcium is [...].", a: "Calcitonin" },
+                            { q: "Endocrinology: Calcitonin acts to [...] blood calcium levels, primarily by inhibiting osteoclast activity.", a: "Lower" },
+                            { q: "Physiology: The active form of Vitamin D is [...], which is produced in the kidney.", a: "Calcitriol (1,25-dihydroxycholecalciferol)" },
+                            { q: "Physiology: The primary function of active Vitamin D is to increase the absorption of calcium and [...] from the intestines.", a: "Phosphate" }
+                        ]
+                    },
+                    {
+                        name: "Osteoarthritis",
+                        cards: [
+                            { q: "Rheumatology: Osteoarthritis (OA) is a [...] disease of synovial joints characterized by the breakdown of articular cartilage.", a: "Degenerative" },
+                            { q: "Pathology: In OA, there is an imbalance between cartilage degradation and its production by [...].", a: "Chondrocytes" },
+                            { q: "Pathology: Cartilage degradation in OA is mediated by pro-inflammatory cytokines, especially [...], and enzymes like matrix metalloproteinases (MMPs).", a: "IL-1 (Interleukin-1)" },
+                            { q: "Pathology: The formation of osteophytes in OA is associated with local [...], particularly TGF (transforming growth factor).", a: "Growth factors" },
+                            { q: "Pathology: The abnormal bony outgrowths seen at the margins of joints in OA are called [...].", a: "Osteophytes" },
+                            { q: "Pathology: The increased bone density and hardening seen beneath the cartilage in OA is termed subchondral [...].", a: "Sclerosis" },
+                            { q: "Pathology: Fluid-filled cavities that can form in the bone beneath the cartilage in OA are known as subchondral [...].", a: "Cysts" },
+                            { q: "Clinical Dx: OA without a known underlying cause is classified as [...] OA.", a: "Primary" },
+                            { q: "Clinical Dx: OA that develops due to a known predisposing condition, such as previous trauma or an inflammatory disease like RA, is called [...] OA.", a: "Secondary" },
+                            { q: "Clinical Dx: The most important modifiable risk factor for primary knee OA is [...].", a: "Obesity" },
+                            { q: "Clinical Dx: The pain pattern in OA, which worsens with activity and improves with rest, is described as [...] pain.", a: "Mechanical" },
+                            { q: "Clinical Dx: Morning stiffness in OA typically lasts for less than [...] minutes.", a: "30" },
+                            { q: "Clinical Dx: The clicking or crackling sound elicited by joint movement in OA is known as [...].", a: "Crepitus" },
+                            { q: "Clinical Dx: Osteoarthritis of the knee joint is also called [...].", a: "Gonarthrosis" },
+                            { q: "Clinical Dx: Osteoarthritis of the hip joint is also called [...].", a: "Coxarthrosis" },
+                            { q: "Clinical Dx: Osteophytes at the distal interphalangeal (DIP) joints in hand OA are called [...] nodes.", a: "Heberden's" },
+                            { q: "Clinical Dx: Osteophytes at the proximal interphalangeal (PIP) joints in hand OA are called [...] nodes.", a: "Bouchard's" },
+                            { q: "Rheumatology: OA is primarily a degenerative disease, while RA is a systemic [...] disease.", a: "Inflammatory (or autoimmune)" },
+                            { q: "Rheumatology: OA typically involves an [...] pattern of joint involvement, while RA is characteristically symmetrical.", a: "Asymmetrical" },
+                            { q: "Rheumatology: OA commonly affects the distal interphalangeal (DIP) joints, while RA characteristically [...] the DIP joints.", a: "Spares" },
+                            { q: "Rheumatology: The presence of [...] on an X-ray is a hallmark of OA and is not seen in RA.", a: "Osteophytes" },
+                            { q: "Clinical Dx: The diagnosis of OA is primarily based on history and [...] findings.", a: "Clinical" },
+                            { q: "Radiology: The four classic radiological findings of OA are joint space narrowing, subchondral sclerosis, subchondral cysts, and [...].", a: "Osteophytes" },
+                            { q: "Radiology: A bowing of the knees outward, common in OA due to medial compartment narrowing, is known as a [...] deformity.", a: "Varus" },
+                            { q: "Treatment: A key non-pharmacologic treatment for an overweight patient with knee OA is [...].", a: "Weight loss" },
+                            { q: "Treatment: Exercises aimed at strengthening the [...] muscles are crucial for supporting the knee joint in OA.", a: "Quadriceps" },
+                            { q: "Treatment: The first-line oral analgesic recommended for mild to moderate OA pain is [...].", a: "Acetaminophen (Paracetamol)" },
+                            { q: "Treatment: For a patient with a painful joint effusion in OA, an intra-articular injection of [...] may be used.", a: "Glucocorticoids" },
+                            { q: "Treatment: In advanced OA with severe pain and functional limitation, a surgical procedure to replace the joint, known as [...], may be indicated.", a: "Joint replacement (Arthroplasty)" }
+                        ]
+                    },
+                    {
+                        name: "Osteomyelitis",
+                        cards: [
+                            { q: "Pathology: Inflammation of the bone and bone marrow, almost always secondary to infection, is called [...].", a: "Osteomyelitis" },
+                            { q: "Microbiology: The most common causative organism in 80-90% of pyogenic osteomyelitis cases is [...].", a: "Staphylococcus aureus" },
+                            { q: "Microbiology: In neonates, osteomyelitis is commonly caused by Haemophilus influenzae and group B [...].", a: "Streptococcus" },
+                            { q: "Microbiology: In patients with sickle cell disease, osteomyelitis is characteristically associated with [...] species.", a: "Salmonella" },
+                            { q: "Pathology: The three common pathways for bone infection are hematogenous spread, contiguous spread, and [...].", a: "Direct inoculation" },
+                            { q: "Pathology: Hematogenous spread of osteomyelitis is most common in [...].", a: "Children" },
+                            { q: "Pathology: In children, hematogenous osteomyelitis most frequently affects the [...] of long bones due to its rich but sluggish blood supply.", a: "Metaphysis" },
+                            { q: "Pathology: The accumulation of pus within the rigid bone in acute osteomyelitis leads to a rapid increase in [...] pressure.", a: "Intramedullary" },
+                            { q: "Pathology: Increased intramedullary pressure compresses blood vessels, leading to vascular compromise and bone [...].", a: "Ischemia (and necrosis)" },
+                            { q: "Pathology: A fragment of dead, necrotic bone that becomes separated from living bone during osteomyelitis is called a [...].", a: "Sequestrum" },
+                            { q: "Pathology: The sheath of new, reactive bone that forms around a sequestrum is known as the [...].", a: "Involucrum" },
+                            { q: "Pathology: Rupture of the periosteum can lead to a soft tissue abscess that forms a channel to the skin, known as a draining [...].", a: "Sinus" },
+                            { q: "Pathology: One major complication of chronic osteomyelitis is the development of squamous cell [...] within a draining sinus tract.", a: "Carcinoma" },
+                            { q: "Clinical Dx: Acute osteomyelitis typically presents with a sudden onset of systemic symptoms like fever and chills, and localized signs like pain, swelling, and [...].", a: "Redness" },
+                            { q: "Clinical Dx: In chronic osteomyelitis, lab markers like ESR and CRP are usually only [...] elevated, in contrast to the significant elevation seen in acute cases.", a: "Modestly" },
+                            { q: "Radiology: On an X-ray, changes from osteomyelitis, such as bone destruction, are typically not visible until [...] days after onset.", a: "10-14" },
+                            { q: "Radiology: The imaging modality that is best for detecting early changes of osteomyelitis, such as bone marrow edema, is [...].", a: "MRI" },
+                            { q: "Radiology: A CT scan is particularly useful for identifying a [...] in cases of chronic osteomyelitis.", a: "Sequestrum" },
+                            { q: "Radiology: The formation of new bone by the periosteum in response to injury or infection is called a periosteal [...].", a: "Reaction" },
+                            { q: "Pathology: Mycobacterial osteomyelitis is most frequently caused by [...].", a: "Mycobacterium tuberculosis" },
+                            { q: "Pathology: Tuberculous osteomyelitis that affects the spine is known as [...] disease.", a: "Pott's" },
+                            { q: "Clinical Dx: Pott's disease can lead to vertebral collapse, causing spinal deformities like kyphosis or [...].", a: "Scoliosis" },
+                            { q: "Treatment: The initial management for acute osteomyelitis primarily consists of long-term intravenous [...].", a: "Antibiotics" },
+                            { q: "Treatment: Chronic osteomyelitis often requires [...] to remove the sequestrum and any necrotic tissue.", a: "Surgical debridement" },
+                            { q: "Treatment: The prognosis for acute osteomyelitis is generally good with early treatment, having an 80-90% success rate, while chronic osteomyelitis has a recurrence rate of [...]%.", a: "30-40" }
+                        ]
+                    },
+                    {
+                        name: "Drugs for Bone Metabolism (Osteoporosis)",
+                        cards: [
+                             { q: "Pathophysiology: Osteoporosis is defined as an imbalance between bone resorption by [...] and bone formation by osteoblasts.", a: "Osteoclasts" },
+                             { q: "Pathophysiology: A non-modifiable risk factor for osteoporosis is being of the [...] sex.", a: "Female" },
+                             { q: "Pathophysiology: A potentially modifiable risk factor for osteoporosis is long-term use of medications like [...].", a: "Corticosteroids" },
+                             { q: "Clinical Dx: The main clinical consequence of osteoporosis is an increased risk of bone [...].", a: "Fractures" },
+                             { q: "Clinical Dx: The gold standard method for measuring bone mineral density (BMD) is [...].", a: "Dual-energy X-ray absorptiometry (DEXA)" },
+                             { q: "Treatment: A crucial dietary supplement for preventing osteoporosis is [...], with a recommended intake of at least 1 gram daily.", a: "Calcium" },
+                             { q: "Pharmacology: Drugs that form new bone by increasing osteoblast activity are classified as [...] agents.", a: "Anabolic" },
+                             { q: "Pharmacology: Drugs that suppress bone resorption by decreasing osteoclast activity are classified as [...] agents.", a: "Antiresorptive" },
+                             { q: "Pharmacology: The main anabolic agent used for osteoporosis is the parathyroid hormone analogue, [...].", a: "Teriparatide" },
+                             { q: "Pharmacology: The primary class of antiresorptive drugs used for osteoporosis is the [...].", a: "Bisphosphonates" },
+                             { q: "Pharmacology: Strontium ranelate is considered a dual-action agent because it both decreases bone resorption and [...] bone formation.", a: "Increases" },
+                             { q: "Pharmacology: Bisphosphonates work by inhibiting osteoclast activity and encouraging osteoclasts to undergo [...].", a: "Apoptosis" },
+                             { q: "Pharmacology: A rare but serious adverse effect of bisphosphonates, particularly the IV forms, is [...] of the jaw.", a: "Osteonecrosis" },
+                             { q: "Pharmacology: A common side effect after the first intravenous infusion of a bisphosphonate is pyrexia and [...] symptoms.", a: "Flu-like" },
+                             { q: "Treatment: Oral bisphosphonates are poorly absorbed and must be taken in the morning on an [...] stomach.", a: "Empty" },
+                             { q: "Treatment: After taking an oral bisphosphonate, the patient must remain [...] for at least 30 minutes to minimize esophageal reflux.", a: "Upright (sitting or standing)" },
+                             { q: "Treatment: After taking an oral bisphosphonate, the patient should avoid eating or taking other medications for at least [...] minutes.", a: "30-60" },
+                             { q: "Pharmacology: Raloxifene is classified as a [...].", a: "Selective Estrogen Receptor Modulator (SERM)" },
+                             { q: "Pharmacology: Raloxifene exerts an estrogenic (agonist) effect on [...].", a: "Bone" },
+                             { q: "Pharmacology: Raloxifene exerts an anti-estrogenic (antagonist) effect on the breast and [...] tissue.", a: "Endometrial" },
+                             { q: "Pharmacology: A major adverse effect and contraindication for raloxifene is the risk of venous [...] events.", a: "Thromboembolic" },
+                             { q: "Pharmacology: A common side effect of raloxifene, related to its anti-estrogenic effects, is [...].", a: "Hot flushes" },
+                             { q: "Pharmacology: Teriparatide is a recombinant segment of human [...] hormone.", a: "Parathyroid (PTH)" },
+                             { q: "Pharmacology: Teriparatide is an anabolic agent that works by stimulating new [...].", a: "Bone formation" },
+                             { q: "Treatment: The use of teriparatide is approved for a maximum duration of [...] years only.", a: "Two" },
+                             { q: "Treatment: A contraindication for teriparatide use is a history of Paget's disease, bone metastases, or prior skeletal [...].", a: "Radiation therapy" },
+                             { q: "Pharmacology: Calcitonin lowers blood calcium by promoting its deposition into bones and inhibiting [...] reabsorption in the kidney.", a: "Ca2+ (Calcium)" },
+                             { q: "Pharmacology: Denosumab is a monoclonal antibody that works by binding to and inhibiting [...].", a: "RANKL" },
+                             { q: "Pharmacology: By inhibiting RANKL, denosumab prevents osteoclast formation, activity, and [...].", a: "Survival" }
+                        ]
+                    }
+                ];
+
+                const userDecksRef = collection(db, `artifacts/${appId}/users/${userId}/decks`);
+
+                for (const deckData of ownerDecksData) {
+                    const deckQuery = query(userDecksRef, where("name", "==", deckData.name), where("folderId", "==", folderId));
+                    const deckSnapshot = await getDocs(deckQuery);
+
+                    if (deckSnapshot.empty) {
+                        console.log(`Creating deck: ${deckData.name}`);
+                        const newDeckRef = await addDoc(userDecksRef, {
+                            name: deckData.name,
+                            folderId: folderId
+                        });
+
+                        const cardsCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/decks/${newDeckRef.id}/cards`);
+                        const batch = writeBatch(db);
+                        deckData.cards.forEach(card => {
+                            const newCardRef = doc(cardsCollectionRef);
+                            batch.set(newCardRef, { front: card.q, back: card.a });
+                        });
+                        await batch.commit();
+                    }
+                }
+            }
+        }
+
+        async function createInitialDeck(userId) {
+            const userFoldersRef = collection(db, `artifacts/${appId}/users/${userId}/folders`);
+            const userDecksRef = collection(db, `artifacts/${appId}/users/${userId}/decks`);
+            const newFolderRef = await addDoc(userFoldersRef, { name: "Getting Started" });
+            const newDeckRef = await addDoc(userDecksRef, { name: "Orthopedic Radiology", folderId: newFolderRef.id });
+            const initialCards = [ { front: "What are the key advantages of an MRI?", back: "No radiation hazard, safe during pregnancy (if essential), can detect early changes, excellent for soft tissues (ligaments, tendons), and good for spinal cord/nerves." }, {front: "What are the main tools of musculoskeletal radiology?", back: "X-Ray, CT Scans, MRI, Bone Scans, PET Scan, SPECT Scan, DEXA Scan, Ultrasound, and Interventional Radiology."} ];
+            const cardsCollection = collection(db, `artifacts/${appId}/users/${userId}/decks/${newDeckRef.id}/cards`);
+            await Promise.all(initialCards.map(card => addDoc(cardsCollection, card)));
+        }
+
+        async function getOrCreateMyPublicReviewsDeck(userId) {
+            if (!userId) return null;
+            const userDecksRef = collection(db, `artifacts/${appId}/users/${userId}/decks`);
+            const deckName = "My Public Reviews";
+
+            const deckQuery = query(userDecksRef, where("name", "==", deckName), where("folderId", "==", null));
+            const querySnapshot = await getDocs(deckQuery);
+
+            if (!querySnapshot.empty) {
+                return querySnapshot.docs[0].id;
+            } else {
+                const newDeckRef = await addDoc(userDecksRef, { name: deckName, folderId: null });
+                return newDeckRef.id;
+            }
+        }
+
+        function setupPublicListeners() {
+            // Unsubscribe from previous listeners if they exist
+            unsubscribePublicFolders();
+            unsubscribePublicDecks();
+            
+            // Listeners for Public Data - these stay active while the user is signed in
+            const publicFoldersRef = collection(db, `artifacts/${appId}/public/data/folders`);
+            unsubscribePublicFolders = onSnapshot(publicFoldersRef, (snapshot) => {
+                publicFolders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                if (!folderView.classList.contains('hidden')) renderFolderView();
+            }, (error) => {
+                console.error("Firestore error on public folders listener:", error);
+            });
+
+            const publicDecksRef = collection(db, `artifacts/${appId}/public/data/decks`);
+            unsubscribePublicDecks = onSnapshot(publicDecksRef, (snapshot) => {
+                publicDecks = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                 if (!deckView.classList.contains('hidden') && currentFolderId) {
+                     const isPublic = !!publicFolders.find(f => f.id === currentFolderId);
+                     renderDeckView(currentFolderId, isPublic);
+                 }
+            }, (error) => {
+                console.error("Firestore error on public decks listener:", error);
+            });
+        }
+
+        function setupUserListeners(userId) {
+            if (!userId) return;
+            // Unsubscribe from any previous user's listeners first
+            unsubscribeFolders();
+            unsubscribeDecks();
+
+            const userFoldersRef = collection(db, `artifacts/${appId}/users/${userId}/folders`);
+            unsubscribeFolders = onSnapshot(userFoldersRef, (snapshot) => {
+                folders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                if (!folderView.classList.contains('hidden')) renderFolderView();
+            }, (error) => {
+                console.error("Firestore error on user folders listener:", error);
+                showAlertModal("Could not load your folders due to a permissions issue. Please try signing out and back in.", "error");
+            });
+
+            const userDecksRef = collection(db, `artifacts/${appId}/users/${userId}/decks`);
+            unsubscribeDecks = onSnapshot(userDecksRef, (snapshot) => {
+                decks = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                if (!deckView.classList.contains('hidden')) {
+                    const isPublic = !!publicFolders.find(f => f.id === currentFolderId);
+                    renderDeckView(currentFolderId, isPublic);
+                }
+                if (!folderView.classList.contains('hidden')) renderFolderView();
+            }, (error) => {
+                console.error("Firestore error on user decks listener:", error);
+                showAlertModal("Could not load your decks due to a permissions issue. Please try signing out and back in.", "error");
+            });
+        }
+
+        // --- AUTH LOGIC ---
+        async function signInWithGoogle() {
+            const provider = new GoogleAuthProvider();
+            try {
+                await signInWithPopup(auth, provider);
+                authError.textContent = '';
+            } catch (error) {
+                console.error("Google sign-in error:", error);
+                authError.textContent = "Could not sign in with Google. Please try again.";
+            }
+        }
+        googleSignInBtn.addEventListener('click', signInWithGoogle);
+
+        async function signInAnonymouslyForDev() {
+            try {
+                await signInAnonymously(auth);
+                authError.textContent = '';
+            } catch (error) {
+                console.error("Anonymous sign-in error:", error);
+                authError.textContent = "Could not sign in anonymously.";
+            }
+        }
+        devSkipSignInBtn.addEventListener('click', signInAnonymouslyForDev);
+
+
+        async function handleSignOut() {
+            try {
+                await signOut(auth);
+            } catch (error) {
+                console.error("Sign out error:", error);
+            }
+        }
+
+
+        // --- NAVIGATION & VIEW RENDERING ---
+        function showView(viewToShow) {
+            [folderView, deckView, flashcardViewer, profileView].forEach(view => view.classList.add('hidden'));
+            viewToShow.classList.remove('hidden');
+        }
+
+        function showFolderView() {
+            currentFolderId = null;
+            currentDeckId = null;
+            showView(folderView);
+            renderFolderView();
+        }
+
+        function showDeckView(folderId, isPublic = false) {
+            currentFolderId = folderId;
+            showView(deckView);
+            renderDeckView(folderId, isPublic);
+        }
+
+        function showFlashcardView(deckId, isPublic = false, isStudyNow = false) {
+            currentDeckId = deckId;
+            chatHistory = []; // Reset chat history when changing decks
+            sessionStats = { totalCards: 0, again: 0, hard: 0, good: 0, easy: 0, ratedCardIds: new Set() }; // Reset stats
+            studySessionStartTime = new Date();
+            showView(flashcardViewer);
+            if (isStudyNow) {
+                 cards = [...dueCards]; // Use the pre-fetched due cards
+                 sessionStats.totalCards = dueCards.length;
+                 renderFlashcardViewer(isPublic, isStudyNow);
+            } else {
+                 setupCardsListener(isPublic);
+            }
+        }
+        
+        function showProfileView() {
+            showView(profileView);
+            renderProfileView();
+        }
+
+        function renderFolderView() {
+            const unfiledDecks = decks.filter(d => !d.folderId);
+            const ownerUID = 'rQAEiO6Nj3XM6kn7HpaL45ok6ki2';
+            const isOwner = currentUserId === ownerUID;
+            
+            getDueCardsCount().then(dueCount => {
+                folderView.innerHTML = `
+                    <header class="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-8 gap-4">
+                        <div class="text-center sm:text-left">
+                            <div class="flex flex-col sm:flex-row items-center justify-center sm:justify-start gap-2 sm:gap-4">
+                                <h1 class="text-2xl sm:text-3xl lg:text-4xl font-bold text-indigo-600">Panki Flashcards</h1>
+                                ${isOwner ? `<span class="bg-yellow-400 text-yellow-900 text-xs font-bold px-2 py-1 rounded-full shadow-md">👑 Owner's Edition</span>` : ''}
+                            </div>
+                            <p class="text-gray-500 mt-1">Organize your flashcards into folders and decks.</p>
+                        </div>
+                         <div class="flex flex-col items-center sm:items-end flex-shrink-0">
+                             <div class="flex items-center gap-2 mb-2">
+                                 <button id="profile-btn" class="p-2 bg-white rounded-full shadow-md hover:bg-gray-200"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></button>
+                                 <button id="calendar-btn" class="p-2 bg-white rounded-full shadow-md hover:bg-gray-200"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/></svg></button>
+                                 <button id="settings-btn" class="p-2 bg-white rounded-full shadow-md hover:bg-gray-200"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+                                 <button id="sign-out-btn" class="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg text-sm transition duration-300">
+                                     Sign Out
+                                 </button>
+                             </div>
+                             ${currentUserId ? `<p class="text-xs text-gray-400 mt-1" title="User ID">UID: ${currentUserId}</p>` : ''}
+                         </div>
+                    </header>
+                    <div class="mb-8 text-center">
+                        <button id="study-now-btn" class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-4 px-6 rounded-lg text-xl shadow-lg transition duration-300 flex items-center justify-center gap-4">
+                            <span>Review Due Cards</span>
+                            <span id="due-card-count" class="bg-white text-green-600 font-bold px-3 py-1 rounded-full">${dueCount}</span>
+                        </button>
+                        <p class="text-sm text-gray-500 mt-2">Using spaced repetition to help you remember.</p>
+                    </div>
+                    <div class="mb-8">
+                        <h2 class="text-xl font-semibold mb-4 text-gray-800 text-center">This Week's Schedule</h2>
+                        <div id="week-view-container" class="grid grid-cols-7 gap-2 sm:gap-4 text-center">
+                            <!-- Weekly calendar will be rendered here -->
+                        </div>
+                    </div>
+                    <h2 class="text-2xl font-semibold mb-4">My Folders</h2>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                        ${folders.map(folder => getFolderHTML(folder, false)).join('')}
+                        ${getAddItemHTML('Folder')}
+                    </div>
+                    ${unfiledDecks.length > 0 ? `
+                        <h2 class="text-2xl font-semibold mt-12 mb-4">Unfiled Decks</h2>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                            ${unfiledDecks.map(deck => getDeckHTML(deck, false)).join('')}
+                        </div>
+                    ` : ''}
+                    ${publicFolders.length > 0 ? `
+                        <h2 class="text-2xl font-semibold mt-12 mb-4">Public Folders</h2>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                            ${publicFolders.map(folder => getFolderHTML(folder, true)).join('')}
+                        </div>
+                    ` : ''}
+                `;
+                folderView.querySelector('#sign-out-btn').addEventListener('click', handleSignOut);
+                folderView.querySelector('#profile-btn').addEventListener('click', showProfileView);
+                folderView.querySelector('#calendar-btn').addEventListener('click', openCalendarModal);
+                folderView.querySelector('#settings-btn').addEventListener('click', openSettingsModal);
+                folderView.querySelector('#study-now-btn').addEventListener('click', startStudyNowSession);
+                folderView.querySelectorAll('[data-folder-id]').forEach(el => el.addEventListener('click', (e) => {
+                    const isPublic = e.currentTarget.dataset.isPublic === 'true';
+                    showDeckView(e.currentTarget.dataset.folderId, isPublic);
+                }));
+                folderView.querySelectorAll('[data-deck-id]').forEach(el => el.addEventListener('click', (e) => showFlashcardView(e.currentTarget.dataset.deckId, false)));
+                folderView.querySelector('#add-Folder-btn').addEventListener('click', openAddFolderModal);
+                setupActionMenus(folderView);
+                renderWeekView();
+            });
+        }
+
+        function renderDeckView(folderId, isPublic = false) {
+            const sourceFolders = isPublic ? publicFolders : folders;
+            const sourceDecks = isPublic ? publicDecks : decks;
+            const folder = sourceFolders.find(f => f.id === folderId);
+            const folderDecks = sourceDecks.filter(d => d.folderId === folderId);
+            
+            deckView.innerHTML = `
+                <header class="mb-8">
+                    <div class="relative flex items-center justify-center mb-2">
+                         <button id="back-to-folders" class="absolute left-0 text-indigo-600 hover:underline">&larr; Back</button>
+                         <h1 class="text-2xl sm:text-3xl lg:text-4xl font-bold text-indigo-600 text-center">${folder ? folder.name : 'Decks'} ${isPublic ? '<span class="text-base align-middle text-blue-500 font-medium">(Public)</span>' : ''}</h1>
+                    </div>
+                    <p class="text-gray-500 text-center">Select a deck to start studying.</p>
+                </header>
+                <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                    ${folderDecks.map(deck => getDeckHTML(deck, isPublic)).join('')}
+                    ${!isPublic ? getAddItemHTML('Deck') : ''}
+                </div>
+            `;
+            deckView.querySelectorAll('[data-deck-id]').forEach(el => el.addEventListener('click', (e) => {
+                const isPublic = e.currentTarget.dataset.isPublic === 'true';
+                showFlashcardView(e.currentTarget.dataset.deckId, isPublic);
+            }));
+
+            deckView.querySelector('#back-to-folders').addEventListener('click', showFolderView);
+            if (!isPublic) {
+                deckView.querySelector('#add-Deck-btn').addEventListener('click', () => openAddDeckModal(folderId));
+            }
+            setupActionMenus(deckView, isPublic);
+        }
+
+        function setupCardsListener(isPublic = false) {
+            unsubscribeCards();
+            if (!currentDeckId || !currentUserId) {
+                cards = [];
+                renderFlashcardViewer(isPublic);
+                return;
+            };
+
+            const basePath = isPublic 
+                ? `artifacts/${appId}/public/data/decks/${currentDeckId}/cards`
+                : `artifacts/${appId}/users/${currentUserId}/decks/${currentDeckId}/cards`;
+
+            const cardsCollectionRef = collection(db, basePath);
+            unsubscribeCards = onSnapshot(cardsCollectionRef, (snapshot) => {
+                cards = snapshot.docs.map(doc => {
+                    const data = doc.data();
+                    // Convert Firestore Timestamps to JS Dates
+                    if (data.nextReviewDate && data.nextReviewDate.toDate) {
+                        data.nextReviewDate = data.nextReviewDate.toDate();
+                    }
+                    return { ...data, id: doc.id };
+                });
+
+                if (sessionStats.totalCards === 0) {
+                    sessionStats.totalCards = cards.length;
+                }
+
+                if (currentIndex >= cards.length && cards.length > 0) currentIndex = cards.length - 1;
+                else if (cards.length === 0) currentIndex = 0;
+                renderFlashcardViewer(isPublic);
+            }, (error) => {
+                console.error("Error listening to cards collection:", error);
+                cards = [];
+                renderFlashcardViewer(isPublic);
+            });
+        }
+        
+        function renderFlashcardViewer(isPublic = false, isStudyNow = false) {
+            const sourceDecks = isPublic ? publicDecks : decks;
+            const deck = isStudyNow ? { name: "Review Session" } : sourceDecks.find(d => d.id === currentDeckId);
+            
+            flashcardViewer.innerHTML = `
+                <header class="mb-8 space-y-4">
+                    <div class="relative flex items-center justify-between">
+                        <button id="back-to-decks" class="text-indigo-600 hover:underline flex-shrink-0">&larr; Back</button>
+                        ${!isPublic && !isStudyNow ? `
+                        <button id="add-card-btn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg text-sm transition duration-300 flex-shrink-0">
+                            + Add Card
+                        </button>
+                        ` : ''}
+                    </div>
+                    <h1 class="text-2xl sm:text-3xl lg:text-4xl font-bold text-indigo-600 text-center">${deck ? deck.name : 'Flashcards'} ${isPublic ? '<span class="text-base align-middle text-blue-500 font-medium">(Public)</span>' : ''}</h1>
+                </header>
+                <div id="flashcard-viewer-content" class="w-full h-full flex-col md:flex-row">
+                        <main id="main-content" class="w-full flex flex-col flex-grow">
+                            <!-- Flashcard layout will be injected here -->
+                        </main>
+                        <div id="ai-chat-panel" class="hidden bg-white rounded-2xl shadow-lg p-4 w-full md:w-1/3 md:flex-shrink-0"></div>
+                </div>
+                <div id="no-cards-message" class="text-center text-gray-500 py-10"></div>
+            `;
+            document.getElementById('back-to-decks').addEventListener('click', () => {
+                endStudySession(); // End any active session when navigating back
+                if (isStudyNow) {
+                     showFolderView();
+                } else {
+                     showDeckView(deck.folderId, isPublic)
+                }
+            });
+
+            if(!isPublic && !isStudyNow) {
+                document.getElementById('add-card-btn').addEventListener('click', openAddCardModal);
+            }
+            
+            const mainContent = flashcardViewer.querySelector('#main-content');
+            const noCardsMessage = flashcardViewer.querySelector('#no-cards-message');
+            const viewerContent = flashcardViewer.querySelector('#flashcard-viewer-content');
+            
+            if (cards.length > 0) {
+                mainContent.innerHTML = getFlashcardLayoutHTML(isPublic, isStudyNow);
+                viewerContent.classList.remove('hidden');
+                noCardsMessage.classList.add('hidden');
+                
+                setupSwipeGestures(isPublic, isStudyNow);
+
+                // document.getElementById('card-container').addEventListener('click', flipCard);
+                document.querySelectorAll('.rating-btn').forEach(btn => btn.addEventListener('click', (e) => {
+                    e.stopPropagation(); // prevent card flip when clicking button
+                    handleCardRating(btn.dataset.rating, isStudyNow);
+                }));
+                
+                document.getElementById('next-btn').addEventListener('click', nextCard);
+                document.getElementById('prev-btn').addEventListener('click', prevCard);
+
+                // Setup menu listeners only if not in public view
+                if (!isPublic && !isStudyNow) {
+                    document.getElementById('card-menu-btn').addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        document.getElementById('card-menu').classList.toggle('hidden');
+                });
+                document.getElementById('edit-card-btn').addEventListener('click', openEditCardModal);
+                document.getElementById('delete-card-btn').addEventListener('click', deleteCard);
+            }
+            
+            // --- EVENT LISTENERS FOR RATING BUTTONS ---
+            document.querySelectorAll('.rating-btn').forEach(btn => btn.addEventListener('click', (e) => {
+                e.stopPropagation(); // prevent card flip when clicking button
+                handleCardRating(btn.dataset.rating, isPublic, isStudyNow);
+            }));
+
+            document.getElementById('explain-btn').addEventListener('click', handleExplainConcept);
+            document.getElementById('mnemonic-btn').addEventListener('click', handleCreateMnemonic);
+
+            updateCardContent();
+        } else {
+                mainContent.innerHTML = '';
+                viewerContent.classList.add('hidden');
+                noCardsMessage.classList.remove('hidden');
+                if(isStudyNow) {
+                    noCardsMessage.innerHTML = `<p class="text-xl">Congratulations!</p><p class="mt-2">You've finished all your due reviews for today.</p>`;
+                } else {
+                    noCardsMessage.innerHTML = `<p class="text-xl">This deck is empty.</p>${!isPublic ? `<p class="mt-2">Click the "+ Add Card" button above to create your first flashcard.</p>` : ''}`;
+                }
+            }
+        }
+        
+        function updateCardContent() {
+            if (cards.length === 0) return;
+
+            const currentCard = cards[currentIndex];
+
+            document.getElementById('card-front-text').textContent = currentCard.front;
+            document.getElementById('card-back-text').textContent = currentCard.back;
+            document.getElementById('card-counter').textContent = `${currentIndex + 1} / ${cards.length}`;
+            
+            const cardInner = document.getElementById('card-inner');
+            if (cardInner) {
+                 cardInner.classList.remove('is-flipped');
+                 cardInner.style.transform = ''; // Reset swipe transform
+            }
+        }
+
+        // --- MODAL & FORM HANDLING ---
+        function openModal(innerHTML) {
+            modalContent.innerHTML = innerHTML;
+            modalContainer.classList.remove('hidden');
+        }
+        function closeModal() {
+            modalContainer.classList.add('hidden');
+            modalContent.innerHTML = '';
+        }
+
+        function showAlertModal(message, type = 'info') {
+            const title = type === 'error' ? 'An Error Occurred' : 'Information';
+            const titleColor = type === 'error' ? 'text-red-600' : 'text-indigo-600';
+            openModal(`
+                <div class="text-center">
+                    <h2 class="text-2xl font-semibold mb-4 ${titleColor}">${title}</h2>
+                    <div class="text-gray-600 mb-6">${message}</div>
+                    <div class="flex justify-center">
+                        <button id="close-alert-modal" class="bg-indigo-600 hover:bg-indigo-700 text-white py-2 px-6 rounded-lg font-semibold">OK</button>
+                    </div>
+                </div>
+            `);
+            document.getElementById('close-alert-modal').onclick = closeModal;
+        }
+
+        function openAddFolderModal() {
+            openModal(`
+                <h2 class="text-2xl font-semibold mb-4">Create New Folder</h2>
+                <input type="text" id="new-folder-name" placeholder="Folder Name" class="w-full p-3 border border-gray-300 rounded-lg mb-4">
+                <div class="flex justify-end gap-2">
+                    <button id="cancel-modal" class="bg-gray-200 py-2 px-4 rounded-lg">Cancel</button>
+                    <button id="confirm-add-folder" class="bg-indigo-600 text-white py-2 px-4 rounded-lg">Create</button>
+                </div>
+            `);
+            document.getElementById('confirm-add-folder').addEventListener('click', async () => {
+                const name = document.getElementById('new-folder-name').value.trim();
+                const userFoldersRef = collection(db, `artifacts/${appId}/users/${currentUserId}/folders`);
+                if (name) await addDoc(userFoldersRef, { name });
+                closeModal();
+            });
+            document.getElementById('cancel-modal').addEventListener('click', closeModal);
+        }
+
+        function openAddDeckModal(folderId) {
+            openModal(getAddDeckModalHTML());
+            document.getElementById('confirm-add-deck').addEventListener('click', async () => {
+                const name = document.getElementById('new-deck-name').value.trim();
+                if (name) {
+                    const userDecksRef = collection(db, `artifacts/${appId}/users/${currentUserId}/decks`);
+                    await addDoc(userDecksRef, { name, folderId });
+                    closeModal();
+                } else { showAlertModal("Please enter a deck name.", 'info'); }
+            });
+             document.getElementById('generate-cards-btn').addEventListener('click', () => handleGenerateFromPdf(folderId));
+            document.getElementById('cancel-modal').addEventListener('click', closeModal);
+        }
+        
+        function openEditFolderModal(folderId) {
+            const folder = folders.find(f => f.id === folderId);
+            if (!folder) return;
+            openModal(`
+                <h2 class="text-2xl font-semibold mb-4">Edit Folder Name</h2>
+                <input type="text" id="edit-folder-name" value="${folder.name}" class="w-full p-3 border border-gray-300 rounded-lg mb-4">
+                <div class="flex justify-end gap-2">
+                    <button id="cancel-modal" class="bg-gray-200 py-2 px-4 rounded-lg">Cancel</button>
+                    <button id="confirm-edit-folder" class="bg-indigo-600 text-white py-2 px-4 rounded-lg">Save</button>
+                </div>
+            `);
+            document.getElementById('confirm-edit-folder').addEventListener('click', async () => {
+                const newName = document.getElementById('edit-folder-name').value.trim();
+                if (newName && newName !== folder.name) {
+                    const folderRef = doc(db, `artifacts/${appId}/users/${currentUserId}/folders`, folderId);
+                    await updateDoc(folderRef, { name: newName });
+                }
+                closeModal();
+            });
+            document.getElementById('cancel-modal').addEventListener('click', closeModal);
+        }
+
+        function openEditDeckModal(deckId) {
+            const deck = decks.find(d => d.id === deckId);
+            if (!deck) return;
+            openModal(`
+                <h2 class="text-2xl font-semibold mb-4">Edit Deck Name</h2>
+                <input type="text" id="edit-deck-name" value="${deck.name}" class="w-full p-3 border border-gray-300 rounded-lg mb-4">
+                <div class="flex justify-end gap-2">
+                    <button id="cancel-modal" class="bg-gray-200 py-2 px-4 rounded-lg">Cancel</button>
+                    <button id="confirm-edit-deck" class="bg-indigo-600 text-white py-2 px-4 rounded-lg">Save</button>
+                </div>
+            `);
+            document.getElementById('confirm-edit-deck').addEventListener('click', async () => {
+                const newName = document.getElementById('edit-deck-name').value.trim();
+                if (newName && newName !== deck.name) {
+                    const deckRef = doc(db, `artifacts/${appId}/users/${currentUserId}/decks`, deckId);
+                    await updateDoc(deckRef, { name: newName });
+                }
+                closeModal();
+            });
+            document.getElementById('cancel-modal').addEventListener('click', closeModal);
+        }
+
+        function openAddCardModal() {
+            openModal(`
+                <h2 class="text-2xl font-semibold mb-4">Add New Card</h2>
+                <div class="space-y-4">
+                    <div>
+                        <label for="new-card-front" class="block text-sm font-medium text-gray-700 mb-1">Front</label>
+                        <textarea id="new-card-front" placeholder="Question or term..." rows="4" class="w-full p-3 border border-gray-300 rounded-lg"></textarea>
+                    </div>
+                    <div>
+                        <label for="new-card-back" class="block text-sm font-medium text-gray-700 mb-1">Back</label>
+                        <textarea id="new-card-back" placeholder="Answer or definition..." rows="4" class="w-full p-3 border border-gray-300 rounded-lg"></textarea>
+                    </div>
+                </div>
+                <div class="flex justify-end gap-2 mt-6">
+                    <button id="cancel-modal" class="bg-gray-200 py-2 px-4 rounded-lg">Cancel</button>
+                    <button id="confirm-add-card" class="bg-indigo-600 text-white py-2 px-4 rounded-lg">Add Card</button>
+                </div>
+            `);
+
+            document.getElementById('confirm-add-card').addEventListener('click', async () => {
+                const front = document.getElementById('new-card-front').value.trim();
+                const back = document.getElementById('new-card-back').value.trim();
+                if (front && back && currentDeckId) {
+                    const cardsCollectionRef = collection(db, `artifacts/${appId}/users/${currentUserId}/decks/${currentDeckId}/cards`);
+                    await addDoc(cardsCollectionRef, { front, back });
+                    closeModal();
+                } else {
+                    showAlertModal("Both front and back fields are required.", 'info');
+                }
+            });
+            document.getElementById('cancel-modal').addEventListener('click', closeModal);
+        }
+
+        function openEditCardModal() {
+            if (cards.length === 0 || !currentDeckId) return;
+            const card = cards[currentIndex];
+            openModal(`
+                <h2 class="text-2xl font-semibold mb-4">Edit Card</h2>
+                <div class="space-y-4">
+                    <div>
+                        <label for="edit-card-front" class="block text-sm font-medium text-gray-700 mb-1">Front</label>
+                        <textarea id="edit-card-front" rows="4" class="w-full p-3 border border-gray-300 rounded-lg">${card.front}</textarea>
+                    </div>
+                    <div>
+                        <label for="edit-card-back" class="block text-sm font-medium text-gray-700 mb-1">Back</label>
+                        <textarea id="edit-card-back" rows="4" class="w-full p-3 border border-gray-300 rounded-lg">${card.back}</textarea>
+                    </div>
+                </div>
+                <div class="flex justify-end gap-2 mt-6">
+                    <button id="cancel-modal" class="bg-gray-200 py-2 px-4 rounded-lg">Cancel</button>
+                    <button id="confirm-edit-card" class="bg-indigo-600 text-white py-2 px-4 rounded-lg">Save Changes</button>
+                </div>
+            `);
+
+            document.getElementById('confirm-edit-card').addEventListener('click', async () => {
+                const front = document.getElementById('edit-card-front').value.trim();
+                const back = document.getElementById('edit-card-back').value.trim();
+                if (front && back) {
+                    const cardDocRef = doc(db, `artifacts/${appId}/users/${currentUserId}/decks/${currentDeckId}/cards`, card.id);
+                    await updateDoc(cardDocRef, { front, back });
+                    closeModal();
+                } else {
+                    showAlertModal("Both front and back fields are required.", 'info');
+                }
+            });
+            document.getElementById('cancel-modal').addEventListener('click', closeModal);
+        }
+
+        // --- GEMINI API FEATURES ---
+
+        function markdownToHtml(md) {
+            // A simple markdown to HTML converter
+            const content = md
+                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') // Bold
+                .replace(/\*(.*?)\*/g, '<em>$1</em>');           // Italic
+
+            // Split into paragraphs based on double newlines
+            return content.split('\n\n').map(paragraph => {
+                // Handle lists within paragraphs
+                if (paragraph.match(/^\s*[\*-]/)) {
+                    const listItems = paragraph.split('\n').map(item => `<li>${item.replace(/^\s*[\*-]\s*/, '')}</li>`).join('');
+                    return `<ul>${listItems}</ul>`;
+                }
+                // It's a regular paragraph, replace single newlines with <br>
+                return `<p>${paragraph.replace(/\n/g, '<br>')}</p>`;
+            }).join('');
+        }
+
+        function openGeminiResultModal(title, content, onCloseCallback) {
+            const htmlContent = markdownToHtml(content);
+            openModal(`
+                <div class="max-h-[80vh] flex flex-col">
+                    <h2 class="text-2xl font-semibold mb-4 flex-shrink-0">${title}</h2>
+                    <div class="overflow-y-auto pr-4 flex-grow prose max-w-none">
+                        ${htmlContent}
+                    </div>
+                    <div class="flex justify-end gap-2 mt-6 flex-shrink-0">
+                        <button id="close-gemini-modal" class="bg-gray-200 py-2 px-4 rounded-lg">Close</button>
+                    </div>
+                </div>
+            `);
+            document.getElementById('close-gemini-modal').addEventListener('click', onCloseCallback || closeModal);
+        }
+
+        async function callGeminiForText(prompt, button, apiUrl = GEMINI_API_URL) {
+            let spinner;
+            if (button) {
+                spinner = button.querySelector('.spinner');
+                button.disabled = true;
+                if (spinner) spinner.classList.remove('hidden');
+            }
+
+            try {
+                const payload = { contents: [{ parts: [{ text: prompt }] }] };
+                const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                if (!response.ok) throw new Error(`API request failed with status ${response.status}`);
+                const result = await response.json();
+                const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
+                if (!text) throw new Error("Invalid response from Gemini API.");
+                return text;
+            } catch (error) {
+                console.error("Gemini API Error:", error);
+                showAlertModal("An error occurred while contacting the AI: " + error.message);
+                return null;
+            } finally {
+                if (button) {
+                    button.disabled = false;
+                    if(spinner) spinner.classList.add('hidden');
+                }
+            }
+        }
+        
+        async function callGeminiForJson(prompt, schema) {
+             openModal(`<div class="flex flex-col items-center justify-center p-8"><div class="spinner"></div><p class="mt-4 text-gray-600">Generating your quiz...</p></div>`);
+            try {
+                const payload = {
+                    contents: [{ parts: [{ text: prompt }] }],
+                    generationConfig: {
+                        responseMimeType: "application/json",
+                        responseSchema: schema
+                    }
+                };
+                const response = await fetch(GEMINI_API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (!response.ok) throw new Error(`API request failed with status ${response.status}`);
+                const result = await response.json();
+                const jsonText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+                if (!jsonText) throw new Error("Invalid response from Gemini API.");
+                return JSON.parse(jsonText);
+            } catch (error) {
+                console.error("Gemini API Error:", error);
+                showAlertModal("An error occurred while contacting the AI: " + error.message);
+                closeModal();
+                return null;
+            }
+        }
+
+        async function handleExplainConcept(e) {
+            e.stopPropagation(); // Prevents the card from flipping
+            if (cards.length === 0) return;
+            const cardContent = cards[currentIndex].back;
+            const prompt = `Please provide a quick but informative explanation of the following concept, suitable for a medical student studying for an exam. Focus on the key details and keep it concise.\n\nConcept:\n"${cardContent}"`;
+            
+            const explanation = await callGeminiForText(prompt, document.getElementById('explain-btn'));
+            if (explanation) {
+                openGeminiResultModal('✨ Quick Explanation', explanation);
+            }
+        }
+
+        async function handleCreateMnemonic(e) {
+            e.stopPropagation(); // Prevents the card from flipping
+             if (cards.length === 0) return;
+            const cardContent = cards[currentIndex].back;
+            const prompt = `Create a clever and memorable mnemonic to help a medical student remember the following information. Explain the mnemonic clearly.\n\nInformation to remember:\n"${cardContent}"`;
+            
+            const mnemonic = await callGeminiForText(prompt, document.getElementById('mnemonic-btn'));
+            if (mnemonic) {
+                openGeminiResultModal('✨ Memory Aid', mnemonic);
+            }
+        }
+        
+        function openQuizTypeModal(deckId, isPublic) {
+            openModal(`
+                <h2 class="text-2xl font-semibold mb-6 text-center">Choose Quiz Type</h2>
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                     <button data-quiz-type="multiple-choice" class="quiz-type-btn bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-3 px-4 rounded-lg">Multiple Choice</button>
+                     <button data-quiz-type="fill-in-the-blank" class="quiz-type-btn bg-blue-500 hover:bg-blue-600 text-white font-bold py-3 px-4 rounded-lg">Fill-in-the-Blank</button>
+                     <button data-quiz-type="true-false" class="quiz-type-btn bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-4 rounded-lg">True/False</button>
+                </div>
+                <div class="flex justify-end mt-6">
+                    <button id="cancel-quiz-type" class="bg-gray-200 py-2 px-4 rounded-lg">Cancel</button>
+                </div>
+            `);
+            document.querySelectorAll('.quiz-type-btn').forEach(btn => {
+                btn.onclick = () => handleQuizDeck(deckId, isPublic, btn.dataset.quizType);
+            });
+            document.getElementById('cancel-quiz-type').onclick = closeModal;
+        }
+
+
+        async function handleQuizDeck(deckId, isPublic, quizType) {
+            const sourceDecks = isPublic ? publicDecks : decks;
+            const deck = sourceDecks.find(d => d.id === deckId);
+            if (!deck) return;
+
+            const basePath = isPublic
+                ? `artifacts/${appId}/public/data/decks/${deckId}/cards`
+                : `artifacts/${appId}/users/${currentUserId}/decks/${deckId}/cards`;
+            const cardsSnapshot = await getDocs(collection(db, basePath));
+            const deckCards = cardsSnapshot.docs.map(doc => doc.data());
+
+            if (deckCards.length === 0) {
+                 showAlertModal("This deck is empty. Add some cards before quizzing!", 'info');
+                 return;
+            }
+            const cardContent = deckCards.map(c => `Q: ${c.front}\nA: ${c.back}`).join('\n---\n');
+            
+            let prompt, schema;
+            
+            switch(quizType) {
+                case 'fill-in-the-blank':
+                    prompt = `You are a medical school exam creator. Based on the following flashcards, generate a challenging fill-in-the-blank quiz with 10 questions. For each, take a key statement from the answer and replace a crucial term with '____'. The 'answer' in the JSON must be the exact term that was removed.\n\nFlashcards:\n${cardContent}`;
+                    schema = { type: "ARRAY", items: { type: "OBJECT", properties: { "question": { "type": "STRING" }, "answer": { "type": "STRING" } }, required: ["question", "answer"] }};
+                    break;
+                case 'true-false':
+                     prompt = `You are a medical school exam creator. Based on the following flashcards, generate a challenging true/false quiz with 10 questions. Create statements based on the card content. For some, create plausible but incorrect statements. The 'isTrue' field in the JSON should be a boolean.\n\nFlashcards:\n${cardContent}`;
+                     schema = { type: "ARRAY", items: { type: "OBJECT", properties: { "statement": { "type": "STRING" }, "isTrue": { "type": "BOOLEAN" } }, required: ["statement", "isTrue"] }};
+                    break;
+                default: // multiple-choice
+                    prompt = `You are a medical school exam creator. Based on the following flashcards, generate a challenging multiple-choice quiz with 10 questions to test a student's memory and understanding. For each question, provide four plausible options, where one is correct. Ensure the 'answer' field in the JSON exactly matches one of the strings in the 'options' array.\n\nFlashcards:\n${cardContent}`;
+                    schema = { type: "ARRAY", items: { type: "OBJECT", properties: { "question": { "type": "STRING" }, "options": { "type": "ARRAY", "items": { "type": "STRING" } }, "answer": { "type": "STRING" } }, required: ["question", "options", "answer"] }};
+                    break;
+            }
+
+            const quizData = await callGeminiForJson(prompt, schema);
+            if (quizData) {
+                openDeckQuizModal(quizData, deck.name, quizType);
+            }
+        }
+
+        function openDeckQuizModal(quizData, deckName, quizType) {
+            let currentQuestionIndex = 0;
+            const userAnswers = new Array(quizData.length).fill({ choice: null, answered: false });
+            
+            // This function is defined inside so it has access to this scope (quizData, userAnswers etc)
+            async function handleQuizExplanation(questionData, userAnswer) {
+                const prompt = `Explain the answer for the following quiz question.
+                                 Question: "${questionData.question || questionData.statement}"
+                                 Correct Answer: "${questionData.answer || questionData.isTrue}"
+                                 User's Answer: "${userAnswer}"
+                                 Provide a concise explanation for why the correct answer is right and, if applicable, why the user's answer was wrong.`;
+                
+                const explanation = await callGeminiForText(prompt, modalContent.querySelector('#explain-quiz-answer-btn'));
+                if (explanation) {
+                    openGeminiResultModal('✨ Answer Explanation', explanation, () => renderQuizView(true));
+                }
+            }
+            
+            function renderQuizView(restoring = false) {
+                 if (!restoring && currentQuestionIndex >= quizData.length) {
+                     renderQuizResults();
+                     return;
+                 }
+                const questionData = quizData[currentQuestionIndex];
+                const hasAnswered = userAnswers[currentQuestionIndex].answered;
+
+                let optionsHTML = '';
+                let questionText = '';
+
+                switch(quizType) {
+                    case 'fill-in-the-blank':
+                        questionText = questionData.question;
+                        optionsHTML = `
+                            <div class="flex gap-2">
+                                <input type="text" id="fill-in-blank-input" class="w-full p-3 border border-gray-300 rounded-lg" ${hasAnswered ? 'disabled' : ''}>
+                                <button id="submit-blank-btn" class="bg-indigo-600 text-white py-2 px-4 rounded-lg" ${hasAnswered ? 'disabled' : ''}>Submit</button>
+                            </div>
+                        `;
+                        if(hasAnswered) {
+                            document.getElementById('fill-in-blank-input').value = userAnswers[currentQuestionIndex].choice;
+                        }
+                        break;
+                    case 'true-false':
+                         questionText = questionData.statement;
+                         optionsHTML = ['True', 'False'].map(option => {
+                             let buttonClass = 'bg-gray-200 hover:bg-gray-300';
+                              if(hasAnswered) {
+                                  const isCorrect = (option === 'True') === questionData.isTrue;
+                                  const isSelected = userAnswers[currentQuestionIndex].choice === option;
+                                  if(isCorrect) buttonClass = 'bg-green-500 text-white';
+                                  else if(isSelected) buttonClass = 'bg-red-500 text-white';
+                              }
+                             return `<button data-option="${option}" class="w-full text-left p-4 ${buttonClass} rounded-lg transition-colors" ${hasAnswered ? 'disabled' : ''}>${option}</button>`;
+                         }).join('');
+                        break;
+                    default: // multiple-choice
+                        questionText = questionData.question;
+                        optionsHTML = questionData.options.map((option, index) => {
+                            let buttonClass = 'bg-gray-200 hover:bg-gray-300';
+                            if (hasAnswered) {
+                                const isCorrect = option === questionData.answer;
+                                const isSelected = userAnswers[currentQuestionIndex].choice === option;
+                                if (isCorrect) buttonClass = 'bg-green-500 text-white';
+                                else if (isSelected) buttonClass = 'bg-red-500 text-white';
+                            }
+                            return `<button data-option="${option}" class="w-full text-left p-4 ${buttonClass} rounded-lg transition-colors" ${hasAnswered ? 'disabled' : ''}>${option}</button>`;
+                        }).join('');
+                        break;
+                }
+
+
+                modalContent.innerHTML = `
+                    <div class="max-h-[80vh] flex flex-col relative">
+                         <button id="close-quiz-btn" class="absolute -top-4 -right-4 bg-red-500 text-white rounded-full h-8 w-8 flex items-center justify-center hover:bg-red-600 transition-colors z-10">&times;</button>
+                        <h2 class="text-2xl font-semibold mb-1 flex-shrink-0">✨ Quiz: ${deckName}</h2>
+                        <p class="text-gray-600 mb-4 text-sm">Question ${currentQuestionIndex + 1} of ${quizData.length}</p>
+                        <div class="overflow-y-auto pr-4 flex-grow prose max-w-none">
+                            <p class="text-gray-800 text-lg mb-4">${questionText}</p>
+                            <div class="space-y-3">${optionsHTML}</div>
+                            <div id="quiz-feedback" class="mt-4"></div>
+                        </div>
+                        <div class="flex justify-between items-center mt-6 flex-shrink-0">
+                             <button id="prev-q-btn" class="bg-gray-300 py-2 px-4 rounded-lg ${currentQuestionIndex === 0 ? 'opacity-50 cursor-not-allowed' : ''}" ${currentQuestionIndex === 0 ? 'disabled' : ''}>Previous</button>
+                            <button id="next-q-btn" class="bg-indigo-600 text-white py-2 px-4 rounded-lg">${currentQuestionIndex === quizData.length - 1 ? 'Finish Quiz' : 'Next'}</button>
+                        </div>
+                    </div>
+                `;
+
+                if (hasAnswered) {
+                    renderFeedback();
+                }
+
+                modalContent.querySelectorAll('[data-option]').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        if (userAnswers[currentQuestionIndex].answered) return;
+                        userAnswers[currentQuestionIndex] = { choice: e.target.dataset.option, answered: true };
+                        renderQuizView();
+                    });
+                });
+                
+                if (quizType === 'fill-in-the-blank') {
+                    document.getElementById('submit-blank-btn').addEventListener('click', () => {
+                         if (userAnswers[currentQuestionIndex].answered) return;
+                        const input = document.getElementById('fill-in-blank-input');
+                        userAnswers[currentQuestionIndex] = { choice: input.value, answered: true };
+                        renderQuizView();
+                    });
+                }
+                
+                document.getElementById('next-q-btn').addEventListener('click', () => {
+                    currentQuestionIndex++;
+                    renderQuizView();
+                });
+                document.getElementById('prev-q-btn').addEventListener('click', () => {
+                    currentQuestionIndex--;
+                    renderQuizView();
+                });
+                 document.getElementById('close-quiz-btn').addEventListener('click', closeModal);
+            }
+
+            function renderFeedback() {
+                const feedbackContainer = modalContent.querySelector('#quiz-feedback');
+                if (!feedbackContainer) return;
+
+                const userAnswer = userAnswers[currentQuestionIndex].choice;
+                const questionData = quizData[currentQuestionIndex];
+                let isCorrect;
+
+                 switch(quizType) {
+                    case 'fill-in-the-blank':
+                        isCorrect = userAnswer.trim().toLowerCase() === questionData.answer.trim().toLowerCase();
+                        break;
+                    case 'true-false':
+                         isCorrect = (userAnswer === 'True') === questionData.isTrue;
+                        break;
+                    default: // multiple-choice
+                         isCorrect = userAnswer === questionData.answer;
+                        break;
+                }
+
+                let feedbackHTML = `<p class="font-semibold ${isCorrect ? 'text-green-600' : 'text-red-600'}">${isCorrect ? 'Correct!' : 'Incorrect!'}</p>`;
+                 if(!isCorrect) {
+                     feedbackHTML += `<p class="text-gray-700">The correct answer is: <strong>${quizType === 'true-false' ? String(questionData.isTrue) : questionData.answer}</strong></p>`;
+                 }
+                feedbackHTML += `<button id="explain-quiz-answer-btn" class="mt-2 bg-blue-100 hover:bg-blue-200 text-blue-800 font-semibold py-2 px-4 rounded-full flex items-center gap-2 transition text-sm">
+                                         <span class="spinner hidden"></span>
+                                         <span>✨ Explain Answer</span>
+                                     </button>`;
+                feedbackContainer.innerHTML = feedbackHTML;
+                feedbackContainer.querySelector('#explain-quiz-answer-btn').addEventListener('click', () => handleQuizExplanation(questionData, userAnswer));
+            }
+
+            function renderQuizResults() {
+                let score = 0;
+                const resultsHTML = quizData.map((q, index) => {
+                    const userAnswer = userAnswers[index].choice;
+                    let isCorrect;
+                    let correctAnswer;
+                    let questionText;
+
+                     switch(quizType) {
+                         case 'fill-in-the-blank':
+                             isCorrect = userAnswer.trim().toLowerCase() === q.answer.trim().toLowerCase();
+                             correctAnswer = q.answer;
+                             questionText = q.question;
+                             break;
+                         case 'true-false':
+                              isCorrect = (userAnswer === 'True') === q.isTrue;
+                              correctAnswer = String(q.isTrue);
+                              questionText = q.statement;
+                             break;
+                         default: // multiple-choice
+                              isCorrect = userAnswer === q.answer;
+                              correctAnswer = q.answer;
+                              questionText = q.question;
+                             break;
+                     }
+
+                    if(isCorrect) score++;
+
+                    return `
+                        <div class="p-4 rounded-lg ${isCorrect ? 'bg-green-50' : 'bg-red-50'} mb-4">
+                            <p class="font-semibold">${index + 1}. ${questionText}</p>
+                            <p class="text-sm mt-2 ${isCorrect ? 'text-green-700' : 'text-red-700'}">Your answer: ${userAnswer || 'Not answered'}</p>
+                            ${!isCorrect ? `<p class="text-sm text-green-700">Correct answer: ${correctAnswer}</p>` : ''}
+                        </div>
+                    `;
+                }).join('');
+
+                modalContent.innerHTML = `
+                    <div class="max-h-[80vh] flex flex-col">
+                        <h2 class="text-3xl font-bold mb-2 flex-shrink-0 text-center">Quiz Complete!</h2>
+                        <p class="text-xl text-gray-700 mb-6 text-center">You scored ${score} out of ${quizData.length}</p>
+                        <div class="overflow-y-auto pr-4 flex-grow">${resultsHTML}</div>
+                        <div class="flex justify-end gap-2 mt-6 flex-shrink-0">
+                            <button id="close-quiz-modal" class="bg-indigo-600 text-white py-2 px-4 rounded-lg">Close</button>
+                        </div>
+                    </div>
+                `;
+                document.getElementById('close-quiz-modal').addEventListener('click', closeModal);
+            }
+            renderQuizView();
+        }
+
+        async function handleGenerateFromPdf(folderId) {
+            const fileInput = document.getElementById('pdf-file');
+            const deckNameInput = document.getElementById('pdf-deck-name');
+            
+            const deckName = deckNameInput.value.trim();
+            const file = fileInput.files[0];
+
+            if (!deckName || !file) {
+                showAlertModal("Please provide a deck name and select a PDF file.", 'info'); return;
+            }
+            
+            const generateBtn = document.getElementById('generate-cards-btn');
+            const btnText = document.getElementById('generate-btn-text');
+            const spinner = generateBtn.querySelector('.spinner');
+            
+            const setLoading = (loading, text) => {
+                generateBtn.disabled = loading;
+                btnText.textContent = text;
+                spinner.classList.toggle('hidden', !loading);
+            };
+
+            setLoading(true, 'Extracting...');
+            try {
+                const textContent = await extractTextFromPdf(file);
+                setLoading(true, 'Generating...');
+                const generatedCards = await generateFlashcardsWithGemini(textContent);
+                setLoading(true, 'Saving...');
+
+                const userDecksRef = collection(db, `artifacts/${appId}/users/${currentUserId}/decks`);
+                const newDeckRef = await addDoc(userDecksRef, { name: deckName, folderId: folderId, pdfTextContent: textContent });
+                
+                const cardsCollection = collection(db, `artifacts/${appId}/users/${currentUserId}/decks/${newDeckRef.id}/cards`);
+                const batch = writeBatch(db);
+                generatedCards.forEach(card => {
+                    const newCardRef = doc(cardsCollection); // Create a new doc reference in the subcollection
+                    batch.set(newCardRef, { front: card.question, back: card.answer });
+                });
+                await batch.commit();
+
+                closeModal();
+            } catch (error) {
+                console.error("PDF Generation Error:", error);
+                showAlertModal("An error occurred: " + error.message);
+            } finally {
+                setLoading(false, 'Generate Flashcards');
+            }
+        }
+        
+        async function extractTextFromPdf(file) {
+            const reader = new FileReader();
+            return new Promise((resolve, reject) => {
+                reader.onload = async (event) => {
+                    try {
+                        const pdf = await pdfjsLib.getDocument({ data: event.target.result }).promise;
+                        let fullText = '';
+                        for (let i = 1; i <= pdf.numPages; i++) {
+                            const page = await pdf.getPage(i);
+                            const textContent = await page.getTextContent();
+                            fullText += textContent.items.map(item => item.str).join(' ') + '\n';
+                        }
+                        resolve(fullText);
+                    } catch (error) { reject(error); }
+                };
+                reader.onerror = (error) => reject(error);
+                reader.readAsArrayBuffer(file);
+            });
+        }
+        
+        async function generateFlashcardsWithGemini(text) {
+             const systemPrompt = `You are an expert learning assistant specializing in medical education. Your task is to create a set of high-quality, effective flashcards on a given medical topic. These flashcards must strictly adhere to Dr. Piotr Wozniak's principles of knowledge formulation for optimal learning and retention.
+Your output should be a series of distinct flashcards, formatted clearly with a Question (Q) and an Answer (A).
+## Core Principles to Follow:
+1. The Golden Rule: The Minimum Information Principle
+Every single flashcard must be atomic. Break down complex concepts into their smallest, indivisible components.
+The answer should ideally be a single word, number, or very short phrase. Avoid long sentences or paragraphs in the answer.
+2. Question & Answer Formatting
+Use Cloze Deletions: Frame most questions as fill-in-the-blank statements. Use [...] to mark the blank. This is the preferred format.
+Optimize Wording: Questions must be concise and unambiguous. Remove all unnecessary words to speed up comprehension.
+Avoid Sets and Lists: NEVER ask for a list of items (e.g., "What are the side effects of Metformin?"). Instead, create a separate flashcard for each individual item.
+Handle Enumerations Correctly: For ordered lists or processes (e.g., steps in a pathway), break them down using overlapping cloze deletions.
+Example for Glycolysis:
+Q: The first step in glycolysis is the phosphorylation of glucose to form [...].
+Q: Glucose-6-phosphate is then isomerized to form [...].
+3. Content Enrichment & Memory Enhancement
+Provide Context: Start with a brief, simple overview of the topic before generating the atomic flashcards. This follows the "Learn before you memorize" rule.
+Use Imagery Prompts: For visual concepts (e.g., anatomy, molecular structures, pathways), insert a placeholder tag like [Diagram of the nephron].
+Create Mnemonics: For difficult-to-remember groups of facts, provide a simple, effective mnemonic.
+Combat Interference: When dealing with easily confused concepts (e.g., drugs with similar names or mechanisms), create questions that specifically highlight their key differences.
+Use Clinical Examples: Connect abstract facts to concrete clinical scenarios, patient presentations, or case vignettes. Personalize it where possible (e.g., "like the presentation of a patient in the ER...").
+4. Structure and Organization
+Build from Basics: Start with the most fundamental, foundational knowledge before moving to more complex details.
+Use Context Cues: Begin questions with a clear topic label to prime the context (e.g., Biochemistry:, Pharmacology:, Anatomy:).
+Create Redundancy: Generate cards in multiple formats to test knowledge from different angles.
+Example:
+Q: Pharmacology: The class of drugs that inhibit HMG-CoA reductase are called [...]. (A: Statins)
+Q: Pharmacology: Statins work by inhibiting which key enzyme? (A: HMG-CoA reductase)
+
+Now, apply these principles to the following text to generate flashcards:
+---
+${text}`;
+
+             const payload = {
+                  contents: [{ parts: [{ text: systemPrompt }] }],
+                  generationConfig: { responseMimeType: "application/json", responseSchema: { type: "ARRAY", items: { type: "OBJECT", properties: { "question": { "type": "STRING" }, "answer": { "type": "STRING" } }, required: ["question", "answer"] } } }
+             };
+             const response = await fetch(GEMINI_PRO_API_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+             if (!response.ok) throw new Error(`Gemini API request failed with status ${response.status}`);
+             const result = await response.json();
+             const jsonText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+             if (!jsonText) throw new Error("Invalid response from Gemini API.");
+             return JSON.parse(jsonText);
+        }
+
+        // --- EVENT HANDLERS & DYNAMIC FUNCTIONS ---
+        function flipCard() {
+            if (cards.length > 0) {
+                document.getElementById('card-container').classList.toggle('is-flipped');
+            }
+        }
+
+        function nextCard() { if (cards.length > 0) { currentIndex = (currentIndex + 1) % cards.length; updateCardContent(); } }
+        function prevCard() { if (cards.length > 0) { currentIndex = (currentIndex - 1 + cards.length) % cards.length; updateCardContent(); } }
+        async function deleteCard() {
+            if (cards.length === 0 || !currentDeckId) return;
+            const cardId = cards[currentIndex].id;
+            const cardDocRef = doc(db, `artifacts/${appId}/users/${currentUserId}/decks/${currentDeckId}/cards`, cardId);
+            await deleteDoc(cardDocRef);
+        }
+
+        // --- NEW DELETE AND MENU LOGIC ---
+        function showConfirmationModal(message) {
+            return new Promise((resolve) => {
+                openModal(`
+                    <div class="text-center">
+                        <h2 class="text-2xl font-semibold mb-4">Are you sure?</h2>
+                        <p class="text-gray-600 mb-6">${message}</p>
+                        <div class="flex justify-center gap-4">
+                            <button id="cancel-confirm" class="bg-gray-300 hover:bg-gray-400 text-gray-800 py-2 px-6 rounded-lg font-semibold">Cancel</button>
+                            <button id="confirm-delete" class="bg-red-600 hover:bg-red-700 text-white py-2 px-6 rounded-lg font-semibold">Delete</button>
+                        </div>
+                    </div>
+                `);
+                document.getElementById('confirm-delete').onclick = () => { closeModal(); resolve(true); };
+                document.getElementById('cancel-confirm').onclick = () => { closeModal(); resolve(false); };
+            });
+        }
+
+        async function handleDeleteFolder(folderId) {
+            const confirmed = await showConfirmationModal("This will permanently delete the folder and ALL decks inside it. This action cannot be undone.");
+            if (confirmed) await deleteFolder(folderId);
+        }
+
+        async function handleDeleteDeck(deckId) {
+            const confirmed = await showConfirmationModal("This will permanently delete this deck and all its cards. This action cannot be undone.");
+            if (confirmed) await deleteDeck(deckId);
+        }
+
+        async function handleMakeFolderPublic(folderId) {
+            const confirmed = await showConfirmationModal("This will create a public, read-only copy of this folder and all its decks, visible to all users. Are you sure?");
+            if (!confirmed) return;
+
+            openModal(`<div class="flex flex-col items-center justify-center p-8"><div class="spinner"></div><p class="mt-4 text-gray-600">Making folder public...</p></div>`);
+
+            try {
+                const ownerId = 'rQAEiO6Nj3XM6kn7HpaL45ok6ki2';
+
+                // 1. Get original folder document
+                const folderRef = doc(db, `artifacts/${appId}/users/${ownerId}/folders`, folderId);
+                const folderSnap = await getDoc(folderRef);
+                if (!folderSnap.exists()) throw new Error("Original folder not found.");
+                const folderData = folderSnap.data();
+
+                // 2. Create the new public folder document
+                const publicFoldersRef = collection(db, `artifacts/${appId}/public/data/folders`);
+                const newPublicFolderRef = await addDoc(publicFoldersRef, {
+                    ...folderData,
+                    isPublic: true,
+                    originalOwnerId: ownerId,
+                    originalFolderId: folderId
+                });
+
+                // 3. Find all original decks within that folder
+                const userDecksRef = collection(db, `artifacts/${appId}/users/${ownerId}/decks`);
+                const decksQuery = query(userDecksRef, where("folderId", "==", folderId));
+                const decksSnapshot = await getDocs(decksQuery);
+
+                const publicDecksRef = collection(db, `artifacts/${appId}/public/data/decks`);
+
+                // 4. Loop through each original deck to copy it and its cards
+                for (const deckDoc of decksSnapshot.docs) {
+                    const deckData = deckDoc.data();
+                    const originalDeckId = deckDoc.id;
+
+                    // Create a public copy of the deck, linking it to the new public folder
+                    const newPublicDeckRef = await addDoc(publicDecksRef, {
+                        ...deckData,
+                        folderId: newPublicFolderRef.id,
+                        isPublic: true,
+                        originalOwnerId: ownerId,
+                        originalDeckId: originalDeckId
+                    });
+
+                    // Copy all cards from the original deck to the new public deck
+                    const originalCardsRef = collection(db, `artifacts/${appId}/users/${ownerId}/decks/${originalDeckId}/cards`);
+                    const publicCardsRef = collection(db, `artifacts/${appId}/public/data/decks/${newPublicDeckRef.id}/cards`);
+                    const cardsSnapshot = await getDocs(originalCardsRef);
+
+                    const batch = writeBatch(db);
+                    cardsSnapshot.forEach(cardDoc => {
+                        const newCardInBatchRef = doc(publicCardsRef);
+                        batch.set(newCardInBatchRef, cardDoc.data());
+                    });
+                    await batch.commit();
+                }
+
+                // 5. Mark the original folder as public to prevent re-publishing
+                await updateDoc(folderRef, { isPublic: true });
+
+                showAlertModal("Folder is now public for all users!", "info");
+
+            } catch (error) {
+                console.error("Error making folder public:", error);
+                showAlertModal("Failed to make folder public. " + error.message, "error");
+            } finally {
+                // Ensure the loading modal always closes
+                const loadingModal = document.querySelector('#modal-container .spinner');
+                if (loadingModal) {
+                    closeModal();
+                }
+            }
+        }
+
+        async function handleDeletePublicFolder(publicFolderId) {
+            const confirmed = await showConfirmationModal("This will permanently delete the PUBLIC COPY of this folder and all its decks. Your original private folder will NOT be affected. This action cannot be undone.");
+            if (confirmed) {
+                await deletePublicFolderAndContents(publicFolderId);
+            }
+        }
+
+        async function deletePublicFolderAndContents(publicFolderId) {
+            openModal(`<div class="flex flex-col items-center justify-center p-8"><div class="spinner"></div><p class="mt-4 text-gray-600">Deleting public folder...</p></div>`);
+            const ownerId = 'rQAEiO6Nj3XM6kn7HpaL45ok6ki2';
+            try {
+                // 1. Get the public folder to find the original folder ID
+                const publicFolderRef = doc(db, `artifacts/${appId}/public/data/folders`, publicFolderId);
+                const publicFolderSnap = await getDoc(publicFolderRef);
+                if (!publicFolderSnap.exists()) throw new Error("Public folder not found.");
+                const { originalFolderId } = publicFolderSnap.data();
+
+                // 2. Find all public decks in the public folder
+                const publicDecksRef = collection(db, `artifacts/${appId}/public/data/decks`);
+                const decksQuery = query(publicDecksRef, where("folderId", "==", publicFolderId));
+                const decksSnapshot = await getDocs(decksQuery);
+
+                // 3. For each public deck, delete its cards, then the deck itself.
+                for (const deckDoc of decksSnapshot.docs) {
+                    const publicDeckId = deckDoc.id;
+                    const publicCardsRef = collection(db, `artifacts/${appId}/public/data/decks/${publicDeckId}/cards`);
+                    const cardsSnapshot = await getDocs(publicCardsRef);
+
+                    const cardBatch = writeBatch(db);
+                    cardsSnapshot.forEach(cardDoc => {
+                        cardBatch.delete(cardDoc.ref);
+                    });
+                    await cardBatch.commit();
+
+                    await deleteDoc(deckDoc.ref);
+                }
+
+                // 4. Delete the public folder document
+                await deleteDoc(publicFolderRef);
+
+                // 5. Update the original private folder to mark it as not public anymore
+                if (originalFolderId) {
+                    const originalFolderRef = doc(db, `artifacts/${appId}/users/${ownerId}/folders`, originalFolderId);
+                    await updateDoc(originalFolderRef, { isPublic: false });
+                }
+                
+                showAlertModal("Public folder successfully deleted.", "info");
+
+            } catch (error) {
+                console.error("Error deleting public folder:", error);
+                showAlertModal("Failed to delete the public folder. " + error.message, "error");
+            } finally {
+                const loadingModal = document.querySelector('#modal-container .spinner');
+                if (loadingModal) {
+                    closeModal();
+                }
+            }
+        }
+
+
+        async function deleteDeck(deckId) {
+            try {
+                const batch = writeBatch(db);
+                // Delete all cards in the deck's subcollection
+                const cardsRef = collection(db, `artifacts/${appId}/users/${currentUserId}/decks/${deckId}/cards`);
+                const cardsSnapshot = await getDocs(cardsRef);
+                cardsSnapshot.docs.forEach(cardDoc => batch.delete(cardDoc.ref));
+
+                // Delete the deck document itself
+                const deckRef = doc(db, `artifacts/${appId}/users/${currentUserId}/decks`, deckId);
+                batch.delete(deckRef);
+                
+                await batch.commit();
+
+                if (currentDeckId === deckId) {
+                    const deletedDeck = decks.find(d => d.id === deckId);
+                    showDeckView(deletedDeck?.folderId);
+                }
+            } catch (error) {
+                console.error("Error deleting deck: ", error);
+                showAlertModal("Failed to delete the deck. Please try again.");
+            }
+        }
+
+        async function deleteFolder(folderId) {
+             try {
+                const userDecksRef = collection(db, `artifacts/${appId}/users/${currentUserId}/decks`);
+                const userFoldersRef = collection(db, `artifacts/${appId}/users/${currentUserId}/folders`);
+                // Find and delete all decks in this folder
+                const decksInFolderQuery = query(userDecksRef, where("folderId", "==", folderId));
+                const decksSnapshot = await getDocs(decksInFolderQuery);
+                
+                // Sequentially delete each deck and its contents to ensure completion
+                for (const deckDoc of decksSnapshot.docs) {
+                    await deleteDeck(deckDoc.id);
+                }
+                
+                // Finally, delete the folder document itself
+                const folderRef = doc(db, `artifacts/${appId}/users/${currentUserId}/folders`, folderId);
+                await deleteDoc(folderRef);
+             } catch(error) {
+                 console.error("Error deleting folder: ", error);
+                 showAlertModal("Failed to delete the folder and its contents. Please try again.");
+             }
+        }
+        
+        function setupActionMenus(viewElement, isPublicView = false) {
+            viewElement.querySelectorAll('[data-menu-btn]').forEach(button => {
+                button.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const menuId = button.dataset.menuBtn + '-menu';
+                    const menu = document.getElementById(menuId);
+                    const isHidden = menu.classList.contains('hidden');
+                    document.querySelectorAll('.action-menu').forEach(m => m.classList.add('hidden'));
+                    if (isHidden) menu.classList.remove('hidden');
+                });
+            });
+            
+            viewElement.querySelectorAll('[data-delete-public-folder]').forEach(el => el.addEventListener('click', (e) => {
+                e.preventDefault(); e.stopPropagation(); handleDeletePublicFolder(el.dataset.deletePublicFolder);
+            }));
+
+            viewElement.querySelectorAll('[data-quiz-deck]').forEach(el => el.addEventListener('click', (e) => {
+                e.preventDefault(); e.stopPropagation(); 
+                const deckElement = el.closest('.bg-white.rounded-2xl').querySelector('[data-deck-id]');
+                const isPublic = deckElement ? deckElement.dataset.isPublic === 'true' : false;
+                openQuizTypeModal(el.dataset.quizDeck, isPublic);
+            }));
+
+            if (isPublicView) return;
+
+            viewElement.querySelectorAll('[data-make-public-folder]').forEach(el => el.addEventListener('click', (e) => {
+                e.preventDefault(); e.stopPropagation(); handleMakeFolderPublic(el.dataset.makePublicFolder);
+            }));
+            viewElement.querySelectorAll('[data-edit-folder]').forEach(el => el.addEventListener('click', (e) => {
+                e.preventDefault(); e.stopPropagation(); openEditFolderModal(el.dataset.editFolder);
+            }));
+             viewElement.querySelectorAll('[data-edit-deck]').forEach(el => el.addEventListener('click', (e) => {
+                e.preventDefault(); e.stopPropagation(); openEditDeckModal(el.dataset.editDeck);
+            }));
+            viewElement.querySelectorAll('[data-delete-folder]').forEach(el => el.addEventListener('click', (e) => {
+                e.preventDefault(); e.stopPropagation(); handleDeleteFolder(el.dataset.deleteFolder);
+            }));
+            viewElement.querySelectorAll('[data-delete-deck]').forEach(el => el.addEventListener('click', (e) => {
+                e.preventDefault(); e.stopPropagation(); handleDeleteDeck(el.dataset.deleteDeck);
+            }));
+
+        }
+
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('[data-menu-btn]') && !e.target.closest('.action-menu')) {
+                document.querySelectorAll('.action-menu').forEach(m => m.classList.add('hidden'));
+            }
+             if (e.target.closest('.card-face') && !e.target.closest('.action-menu button')) {
+                 document.querySelectorAll('.action-menu').forEach(m => m.classList.add('hidden'));
+             }
+        });
+
+        // --- Spaced Repetition System (SRS) Functions ---
+        
+        function calculateSpacedRepetition(card, rating) {
+            let { repetitions = 0, easeFactor = 2.5, interval = 0 } = card;
+
+            if (rating === 'again') {
+                repetitions = 0;
+                interval = 1;
+            } else {
+                repetitions += 1;
+                if (repetitions === 1) {
+                    interval = 1;
+                } else if (repetitions === 2) {
+                    interval = 6;
+                } else {
+                    interval = Math.round(interval * easeFactor);
+                }
+
+                if (rating === 'hard') {
+                    easeFactor = Math.max(1.3, easeFactor - 0.15);
+                } else if (rating === 'easy') {
+                    easeFactor += 0.15;
+                }
+            }
+            
+            const nextReviewDate = new Date();
+            nextReviewDate.setDate(nextReviewDate.getDate() + interval);
+
+            return { repetitions, easeFactor, interval, nextReviewDate };
+        }
+        
+        function setupSwipeGestures(isPublic, isStudyNow) {
+            const cardInner = document.getElementById('card-inner');
+            const overlayLeft = document.getElementById('swipe-overlay-left');
+            const overlayRight = document.getElementById('swipe-overlay-right');
+            
+            let isDragging = false;
+            let startX = 0;
+            let currentX = 0;
+            let startTime = 0;
+            const threshold = 100; // pixels to trigger action
+
+            const dragStart = (e) => {
+                isDragging = true;
+                startTime = new Date().getTime();
+                startX = e.type === 'touchstart' ? e.touches[0].clientX : e.clientX;
+                currentX = startX; // FIX: Initialize currentX to detect no-move clicks
+                
+                // Only disable transition if not flipped, to allow smooth dragging
+                if (!cardInner.classList.contains('is-flipped')) {
+                    cardInner.style.transition = 'none';
+                }
+            };
+
+            const dragging = (e) => {
+                if (!isDragging) return;
+                // Don't allow dragging if the card is flipped
+                if (cardInner.classList.contains('is-flipped')) return;
+
+                currentX = e.type === 'touchmove' ? e.touches[0].clientX : e.clientX;
+                const diffX = currentX - startX;
+                
+                cardInner.style.transform = `translateX(${diffX}px) rotate(${diffX / 20}deg)`;
+
+                const opacity = Math.min(Math.abs(diffX) / threshold, 1);
+                if (diffX > 0) { // Swiping right
+                    overlayRight.style.opacity = opacity;
+                    overlayLeft.style.opacity = 0;
+                } else { // Swiping left
+                    overlayLeft.style.opacity = opacity;
+                    overlayRight.style.opacity = 0;
+                }
+            };
+
+            const dragEnd = (e) => {
+                if (!isDragging) return;
+                isDragging = false;
+                const endTime = new Date().getTime();
+                const timeDiff = endTime - startTime;
+                const diffX = currentX - startX;
+
+                // If it was a click (short and small movement), just flip. This works even if card is already flipped.
+                if (timeDiff < 200 && Math.abs(diffX) < 10) {
+                    cardInner.style.transition = ''; // FIX: Restore transition for flip animation
+                    flipCard();
+                    startX = 0;
+                    currentX = 0;
+                    return; // Important to stop here
+                }
+
+                // If it was a drag, but the card is flipped, do nothing.
+                if (cardInner.classList.contains('is-flipped')) {
+                    startX = 0;
+                    currentX = 0;
+                    // Also reset transform and transition if a drag was attempted on a flipped card
+                    cardInner.style.transition = '';
+                    cardInner.style.transform = '';
+                    return;
+                }
+
+                cardInner.style.transition = 'transform 0.6s'; // Re-enable transition for swipe/reset
+                overlayLeft.style.opacity = 0;
+                overlayRight.style.opacity = 0;
+
+
+                if (Math.abs(diffX) > threshold) {
+                    if (diffX > 0) { // Swiped right
+                        cardInner.style.transform = 'translateX(1000px) rotate(30deg)';
+                        handleCardRating('easy', isPublic, isStudyNow, true);
+                    } else { // Swiped left
+                        cardInner.style.transform = 'translateX(-1000px) rotate(-30deg)';
+                        handleCardRating('again', isPublic, isStudyNow, true);
+                    }
+                } else {
+                    cardInner.style.transform = ''; // Reset position
+                }
+
+                startX = 0;
+                currentX = 0;
+            };
+
+            cardInner.addEventListener('mousedown', dragStart);
+            cardInner.addEventListener('touchstart', dragStart, { passive: true });
+            
+            document.addEventListener('mousemove', dragging);
+            document.addEventListener('touchmove', dragging, { passive: true });
+
+            document.addEventListener('mouseup', dragEnd);
+            document.addEventListener('touchend', dragEnd);
+        }
+
+
+        async function handleCardRating(rating, isPublic = false, isStudyNow = false, isSwipe = false) {
+            const card = cards[currentIndex];
+
+            if (isPublic) {
+                // For public cards, add a copy to the user's personal review deck
+                const publicReviewsDeckId = await getOrCreateMyPublicReviewsDeck(currentUserId);
+                if (!publicReviewsDeckId) {
+                    showAlertModal("Could not create a personal deck for public reviews.", "error");
+                    return;
+                }
+                const userPublicReviewsCardsRef = collection(db, `artifacts/${appId}/users/${currentUserId}/decks/${publicReviewsDeckId}/cards`);
+
+                // Check if this card has already been imported by the user
+                const cardQuery = query(userPublicReviewsCardsRef, where("originalPublicCardId", "==", card.id));
+                const cardSnapshot = await getDocs(cardQuery);
+                
+                const srsData = calculateSpacedRepetition({}, rating); // Calculate initial SRS data
+
+                if (!cardSnapshot.empty) {
+                    // Card already exists, just update its SRS data
+                    const existingCardRef = cardSnapshot.docs[0].ref;
+                    await updateDoc(existingCardRef, srsData);
+                } else {
+                    // Card doesn't exist, create a new one
+                    await addDoc(userPublicReviewsCardsRef, {
+                        front: card.front,
+                        back: card.back,
+                        originalPublicCardId: card.id, // Keep track of the original
+                        originalPublicDeckId: currentDeckId,
+                        ...srsData
+                    });
+                }
+                
+                showAlertModal(`Card added to your "My Public Reviews" deck!`, "info");
+                if (isSwipe) {
+                    setTimeout(nextCard, 200);
+                } else {
+                    const ratingBtn = document.querySelector(`button[data-rating="${rating}"]`);
+                    if (ratingBtn) {
+                        ratingBtn.classList.add('ring-2', 'ring-white');
+                        setTimeout(() => ratingBtn.classList.remove('ring-2', 'ring-white'), 500);
+                    }
+                    setTimeout(nextCard, 200);
+                }
+
+            } else {
+                // This is a private card, handle it the original way
+                const srsData = calculateSpacedRepetition(card, rating);
+                const deckId = isStudyNow ? card.deckId : currentDeckId;
+                const cardRef = doc(db, `artifacts/${appId}/users/${currentUserId}/decks/${deckId}/cards`, card.id);
+                try {
+                    await updateDoc(cardRef, srsData);
+                    await updateStudyStreak(); // Always update stats on any rating
+                    
+                    sessionStats[rating]++;
+                    sessionStats.ratedCardIds.add(card.id);
+
+                    if (isStudyNow) {
+                        cards.splice(currentIndex, 1); // Remove from study now session
+                        if(currentIndex >= cards.length && cards.length > 0) {
+                            currentIndex = cards.length - 1;
+                        }
+
+                        if(cards.length === 0){
+                            endStudySession();
+                            showSessionSummaryModal(sessionStats);
+                            return;
+                        }
+                        // Wait a bit for swipe out animation before updating content
+                        setTimeout(() => renderFlashcardViewer(false, true), 200);
+
+                    } else {
+                        cards[currentIndex] = {...card, ...srsData}; // update local card data
+
+                        if (sessionStats.ratedCardIds.size === sessionStats.totalCards) {
+                             setTimeout(() => {
+                                 endStudySession();
+                                 showSessionSummaryModal(sessionStats);
+                             }, 200);
+                        } else {
+                             if (isSwipe) {
+                                 setTimeout(nextCard, 200);
+                             } else {
+                                // Visual feedback for button click
+                                const ratingBtn = document.querySelector(`button[data-rating="${rating}"]`);
+                                if (ratingBtn) {
+                                    ratingBtn.classList.add('ring-2', 'ring-white');
+                                    setTimeout(() => ratingBtn.classList.remove('ring-2', 'ring-white'), 500);
+                                }
+                                setTimeout(nextCard, 200);
+                             }
+                        }
+                    }
+
+                } catch (error) {
+                    console.error("Error updating card SRS data:", error);
+                    showAlertModal("Failed to save your progress. Please try again.", "error");
+                }
+            }
+        }
+        
+         async function getDueCardsCount() {
+            if (!currentUserId) return 0;
+            let dueCount = 0;
+            const today = new Date();
+            today.setHours(23, 59, 59, 999); // End of today
+
+            try {
+                const decksSnapshot = await getDocs(collection(db, `artifacts/${appId}/users/${currentUserId}/decks`));
+                for (const deckDoc of decksSnapshot.docs) {
+                    const cardsSnapshot = await getDocs(collection(db, `artifacts/${appId}/users/${currentUserId}/decks/${deckDoc.id}/cards`));
+                    cardsSnapshot.forEach(cardDoc => {
+                        const cardData = cardDoc.data();
+                        if (cardData.nextReviewDate) { // Only count cards that have been rated at least once
+                             const reviewDate = cardData.nextReviewDate.toDate ? cardData.nextReviewDate.toDate() : new Date(cardData.nextReviewDate);
+                             if (reviewDate <= today) {
+                                 dueCount++;
+                             }
+                        }
+                    });
+                }
+            } catch (error) {
+                console.error("Error getting due cards count:", error);
+            }
+            return dueCount;
+        }
+
+        async function startStudyNowSession() {
+            if (!currentUserId) return;
+            dueCards = [];
+            const today = new Date();
+            today.setHours(23, 59, 59, 999);
+
+            try {
+                openModal(`<div class="flex flex-col items-center justify-center p-8"><div class="spinner"></div><p class="mt-4 text-gray-600">Preparing your study session...</p></div>`);
+                
+                const decksSnapshot = await getDocs(collection(db, `artifacts/${appId}/users/${currentUserId}/decks`));
+                for (const deckDoc of decksSnapshot.docs) {
+                    const cardsSnapshot = await getDocs(collection(db, `artifacts/${appId}/users/${currentUserId}/decks/${deckDoc.id}/cards`));
+                    cardsSnapshot.forEach(cardDoc => {
+                        const cardData = cardDoc.data();
+                        if (cardData.nextReviewDate) {
+                             const reviewDate = cardData.nextReviewDate.toDate ? cardData.nextReviewDate.toDate() : new Date(cardData.nextReviewDate);
+                             if(reviewDate <= today) {
+                                 dueCards.push({ ...cardData, id: cardDoc.id, deckId: deckDoc.id });
+                             }
+                        }
+                    });
+                }
+
+                closeModal();
+                if(dueCards.length > 0) {
+                     currentIndex = 0;
+                     showFlashcardView(null, false, true);
+                } else {
+                     showAlertModal("You have no cards due for review today. Great job!", "info");
+                }
+            } catch (error) {
+                console.error("Error starting study now session:", error);
+                closeModal();
+            }
+        }
+        
+        function openCalendarModal() {
+            openModal(getCalendarModalHTML());
+            renderCalendar();
+            document.getElementById('prev-month').addEventListener('click', () => changeMonth(-1));
+            document.getElementById('next-month').addEventListener('click', () => changeMonth(1));
+            document.getElementById('close-calendar-modal').addEventListener('click', closeModal);
+        }
+        
+        let calendarDate = new Date();
+
+        function changeMonth(direction) {
+            calendarDate.setMonth(calendarDate.getMonth() + direction);
+            renderCalendar();
+        }
+
+        async function renderCalendar() {
+             const calendarBody = document.getElementById('calendar-body');
+             const monthYear = document.getElementById('month-year');
+             if(!calendarBody || !monthYear) return;
+
+             calendarBody.innerHTML = '<div class="flex justify-center items-center h-full"><div class="spinner"></div></div>';
+             monthYear.textContent = calendarDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+            
+             const dueDatesMap = new Map();
+             const decksSnapshot = await getDocs(collection(db, `artifacts/${appId}/users/${currentUserId}/decks`));
+             for (const deckDoc of decksSnapshot.docs) {
+                 const cardsSnapshot = await getDocs(collection(db, `artifacts/${appId}/users/${currentUserId}/decks/${deckDoc.id}/cards`));
+                 cardsSnapshot.forEach(cardDoc => {
+                     const cardData = cardDoc.data();
+                     if (cardData.nextReviewDate) {
+                         const reviewDate = (cardData.nextReviewDate.toDate ? cardData.nextReviewDate.toDate() : new Date(cardData.nextReviewDate)).toDateString();
+                         dueDatesMap.set(reviewDate, (dueDatesMap.get(reviewDate) || 0) + 1);
+                     }
+                 });
+             }
+
+             const year = calendarDate.getFullYear();
+             const month = calendarDate.getMonth();
+             const today = new Date();
+             const todayStr = today.toDateString();
+             const firstDay = new Date(year, month, 1).getDay();
+             const daysInMonth = new Date(year, month + 1, 0).getDate();
+             
+             calendarBody.innerHTML = '';
+             for(let i = 0; i < firstDay; i++) {
+                 calendarBody.innerHTML += '<div></div>';
+             }
+
+             for(let day = 1; day <= daysInMonth; day++) {
+                 const date = new Date(year, month, day);
+                 const dateStr = date.toDateString();
+                 const dueCount = dueDatesMap.get(dateStr);
+                 
+                 let bgClass = 'bg-white';
+                 if (dueCount > 0) {
+                     if (dueCount >= 10) bgClass = 'bg-blue-300';
+                     else if (dueCount >= 4) bgClass = 'bg-blue-200';
+                     else bgClass = 'bg-blue-100';
+                 }
+
+                 const isToday = dateStr === todayStr;
+                 const todayClass = isToday ? 'border-2 border-indigo-500' : 'border border-gray-200';
+                 const clickableClass = dueCount ? 'cursor-pointer hover:shadow-md' : '';
+                 const title = dueCount ? `title="${dueCount} cards due"` : '';
+
+
+                 let cellHTML = `<div data-date="${date.toISOString()}" ${title} class="p-2 h-24 flex flex-col items-center justify-center rounded-lg ${bgClass} ${todayClass} ${clickableClass} transition-shadow">
+                                         <span>${day}</span>`;
+                 if (dueCount) {
+                     cellHTML += `<span class="mt-1 bg-indigo-500 text-white text-xs font-bold px-2 py-1 rounded-full">${dueCount}</span>`;
+                 }
+                 cellHTML += '</div>';
+                 calendarBody.innerHTML += cellHTML;
+             }
+
+             calendarBody.querySelectorAll('[data-date]').forEach(cell => {
+                 if(dueDatesMap.has(new Date(cell.dataset.date).toDateString())) {
+                   cell.addEventListener('click', () => showDayDetailsModal(cell.dataset.date));
+                 }
+             });
+        }
+        
+        function showSessionSummaryModal(stats) {
+            const { totalCards, again, hard, good, easy } = stats;
+            const correctCount = good + easy;
+            const accuracy = totalCards > 0 ? Math.round((correctCount / totalCards) * 100) : 0;
+
+            let message = '';
+            if (accuracy >= 90) {
+                message = "Excellent work! You've mastered this session.";
+            } else if (accuracy >= 70) {
+                message = "Great job! Keep up the consistent effort.";
+            } else {
+                message = "Good start. Repetition is key to mastery.";
+            }
+
+            openModal(`
+                <div class="text-center">
+                    <h2 class="text-3xl font-bold mb-4 text-indigo-600">Session Complete!</h2>
+                    <p class="text-gray-600 mb-6">${message}</p>
+                    <div class="mb-6">
+                        <div class="text-5xl font-bold text-green-500">${accuracy}%</div>
+                        <div class="text-gray-500">Accuracy</div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4 text-left mx-auto max-w-sm">
+                        <div class="bg-gray-100 p-4 rounded-lg">
+                            <p class="font-bold text-lg">${totalCards}</p>
+                            <p class="text-gray-600">Total Cards Reviewed</p>
+                        </div>
+                        <div class="bg-red-100 p-4 rounded-lg">
+                            <p class="font-bold text-lg">${again}</p>
+                            <p class="text-red-600">Rated "Again"</p>
+                        </div>
+                        <div class="bg-orange-100 p-4 rounded-lg">
+                            <p class="font-bold text-lg">${hard}</p>
+                            <p class="text-orange-600">Rated "Hard"</p>
+                        </div>
+                         <div class="bg-blue-100 p-4 rounded-lg">
+                            <p class="font-bold text-lg">${good}</p>
+                            <p class="text-blue-600">Rated "Good"</p>
+                        </div>
+                        <div class="bg-green-100 p-4 rounded-lg col-span-2">
+                            <p class="font-bold text-lg">${easy}</p>
+                            <p class="text-green-600">Rated "Easy"</p>
+                        </div>
+                    </div>
+                     <div class="flex justify-center mt-8">
+                         <button id="close-summary-modal" class="bg-indigo-600 hover:bg-indigo-700 text-white py-2 px-6 rounded-lg font-semibold">Done</button>
+                     </div>
+                </div>
+            `);
+            
+            document.getElementById('close-summary-modal').onclick = () => {
+                closeModal();
+                showFolderView();
+            };
+        }
+
+         async function showDayDetailsModal(dateISO) {
+             const date = new Date(dateISO);
+              const today = new Date();
+              today.setHours(0,0,0,0);
+             const isFutureDate = date > today;
+
+             const startOfDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+             const endOfDay = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59);
+
+             let dueCardsToday = [];
+             const decksSnapshot = await getDocs(collection(db, `artifacts/${appId}/users/${currentUserId}/decks`));
+             for (const deckDoc of decksSnapshot.docs) {
+                 const cardsSnapshot = await getDocs(collection(db, `artifacts/${appId}/users/${currentUserId}/decks/${deckDoc.id}/cards`));
+                 cardsSnapshot.forEach(cardDoc => {
+                     const cardData = cardDoc.data();
+                     if(cardData.nextReviewDate) {
+                         const reviewDate = cardData.nextReviewDate.toDate();
+                         if(reviewDate >= startOfDay && reviewDate <= endOfDay) {
+                             dueCardsToday.push({ ...cardData, id: cardDoc.id, deckId: deckDoc.id, deckName: decks.find(d => d.id === deckDoc.id)?.name || 'Unknown Deck' });
+                         }
+                     }
+                 });
+             }
+
+             const cardsByDeck = dueCardsToday.reduce((acc, card) => {
+                 if (!acc[card.deckName]) acc[card.deckName] = [];
+                 acc[card.deckName].push(card);
+                 return acc;
+             }, {});
+
+             const detailsHTML = Object.entries(cardsByDeck).map(([deckName, cards]) => `
+                 <div class="mb-4">
+                     <h4 class="font-bold text-lg">${deckName} (${cards.length})</h4>
+                     <ul class="list-disc pl-5 text-gray-700">
+                         ${cards.map(c => `<li>${c.front.substring(0, 50)}...</li>`).join('')}
+                     </ul>
+                 </div>
+             `).join('');
+
+             openModal(`
+                 <div class="max-h-[80vh] flex flex-col">
+                     <h3 class="text-xl font-bold mb-4">Reviews for ${date.toLocaleDateString()}</h3>
+                     <div class="overflow-y-auto pr-4">${detailsHTML || '<p>No reviews scheduled for this day.</p>'}</div>
+                     <div class="flex justify-between items-center mt-6">
+                         ${isFutureDate ? `<button id="study-ahead-btn" class="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-lg">Study Ahead</button>` : '<div></div>'}
+                         <button id="close-day-details-modal" class="bg-gray-200 py-2 px-4 rounded-lg">Close</button>
+                     </div>
+                 </div>
+             `);
+
+              if(isFutureDate) {
+                  document.getElementById('study-ahead-btn').addEventListener('click', () => {
+                      dueCards = dueCardsToday;
+                      closeModal();
+                      if(dueCards.length > 0) {
+                          currentIndex = 0;
+                          studySessionStartTime = new Date();
+                          showFlashcardView(null, false, true);
+                      } else {
+                          showAlertModal("Something went wrong, no cards found for this session.", "error");
+                      }
+                  });
+              }
+
+              document.getElementById('close-day-details-modal').addEventListener('click', () => {
+                  closeModal();
+                  openCalendarModal(); // Re-open calendar after closing details
+              });
+         }
+        
+        async function renderWeekView() {
+            const container = document.getElementById('week-view-container');
+            if (!container) return;
+            container.innerHTML = `<div class="col-span-7 flex justify-center items-center p-4"><div class="spinner"></div></div>`;
+
+            const today = new Date();
+            today.setHours(0, 0, 0, 0); // Normalize today to the start of the day
+            const startOfWeek = new Date(today);
+            startOfWeek.setDate(today.getDate() - today.getDay()); // Sunday as start
+
+            const weekDates = Array.from({ length: 7 }, (_, i) => {
+                const date = new Date(startOfWeek);
+                date.setDate(startOfWeek.getDate() + i);
+                return date;
+            });
+
+            // Fetch due cards data
+            const dueDatesMap = new Map();
+            const decksSnapshot = await getDocs(collection(db, `artifacts/${appId}/users/${currentUserId}/decks`));
+            for (const deckDoc of decksSnapshot.docs) {
+                const cardsRef = collection(db, `artifacts/${appId}/users/${currentUserId}/decks/${deckDoc.id}/cards`);
+                const cardsSnapshot = await getDocs(cardsRef); 
+                cardsSnapshot.forEach(cardDoc => {
+                    const cardData = cardDoc.data();
+                    if (cardData.nextReviewDate) { 
+                        const reviewDate = (cardData.nextReviewDate.toDate ? cardData.nextReviewDate.toDate() : new Date(cardData.nextReviewDate)).toDateString();
+                        dueDatesMap.set(reviewDate, (dueDatesMap.get(reviewDate) || 0) + 1);
+                    }
+                });
+            }
+
+            let weekHTML = '';
+            const todayStr = today.toDateString();
+            weekDates.forEach(date => {
+                const dateStr = date.toDateString();
+                const dayName = date.toLocaleDateString('en-US', { weekday: 'short' });
+                const dayNumber = date.getDate();
+                const dueCount = dueDatesMap.get(dateStr);
+                const isToday = dateStr === todayStr;
+
+                const dayBgClass = isToday ? 'bg-indigo-600 text-white' : 'bg-white text-gray-700';
+                const countClasses = isToday ? 'bg-white text-indigo-600' : 'bg-indigo-500 text-white';
+
+                weekHTML += `
+                    <div class="${dayBgClass} p-2 sm:p-4 rounded-lg shadow flex flex-col items-center justify-center">
+                        <div class="font-bold text-sm sm:text-base">${dayName}</div>
+                        <div class="text-xl sm:text-2xl font-bold mt-1">${dayNumber}</div>
+                        <div class="text-xs sm:text-sm mt-2 h-6 flex items-center">
+                            ${dueCount ? `<span class="${countClasses} px-2 py-0.5 rounded-full font-bold">${dueCount}</span>` : ''}
+                        </div>
+                    </div>
+                `;
+            });
+            container.innerHTML = weekHTML;
+        }
+        
+        function openSettingsModal(){
+            openModal(getSettingsModalHTML());
+            document.getElementById('close-settings-modal').addEventListener('click', closeModal);
+        }
+
+        async function endStudySession() {
+            if (!studySessionStartTime || !currentUserId) return;
+
+            const durationInSeconds = Math.round((new Date() - studySessionStartTime) / 1000);
+            studySessionStartTime = null; // Reset immediately
+
+            if (durationInSeconds > 0) {
+                const profileRef = doc(db, `artifacts/${appId}/users/${currentUserId}/profile`, 'data');
+                const profileSnap = await getDoc(profileRef);
+                if (profileSnap.exists()) {
+                    const currentTotal = profileSnap.data().totalStudyTime || 0;
+                    await updateDoc(profileRef, {
+                        totalStudyTime: currentTotal + durationInSeconds
+                    });
+                }
+            }
+        }
+
+        async function updateStudyStreak() {
+            if (!currentUserId) return;
+            const profileRef = doc(db, `artifacts/${appId}/users/${currentUserId}/profile`, 'data');
+            const profileSnap = await getDoc(profileRef);
+            if (!profileSnap.exists()) return;
+
+            const profileData = profileSnap.data();
+            const today = new Date().toDateString();
+            const lastStudied = profileData.lastStudiedDate ? profileData.lastStudiedDate.toDate().toDateString() : null;
+            
+            const updates = {
+                totalReviews: (profileData.totalReviews || 0) + 1
+            };
+
+            if (today !== lastStudied) {
+                const yesterday = new Date();
+                yesterday.setDate(yesterday.getDate() - 1);
+                updates.streak = lastStudied === yesterday.toDateString() ? profileData.streak + 1 : 1;
+                updates.lastStudiedDate = serverTimestamp();
+            }
+            
+            await updateDoc(profileRef, updates);
+        }
+        
+        function formatStudyTime(totalSeconds) {
+            if (!totalSeconds) return '0m';
+            const hours = Math.floor(totalSeconds / 3600);
+            const minutes = Math.floor((totalSeconds % 3600) / 60);
+            if (hours > 0) {
+                return `${hours}h ${minutes}m`;
+            }
+            return `${minutes}m`;
+        }
+
+        async function renderProfileView() {
+            profileView.innerHTML = `<div class="flex justify-center items-center h-full"><div class="spinner"></div></div>`;
+
+            try {
+                // Fetch profile data
+                const profileRef = doc(db, `artifacts/${appId}/users/${currentUserId}/profile`, 'data');
+                const profileSnap = await getDoc(profileRef);
+                const profileData = profileSnap.exists() ? profileSnap.data() : { streak: 0, totalReviews: 0, totalStudyTime: 0 };
+
+                // Calculate mastered cards
+                let masteredCount = 0;
+                const decksSnapshot = await getDocs(collection(db, `artifacts/${appId}/users/${currentUserId}/decks`));
+                for (const deckDoc of decksSnapshot.docs) {
+                    const cardsSnapshot = await getDocs(collection(db, `artifacts/${appId}/users/${currentUserId}/decks/${deckDoc.id}/cards`));
+                    cardsSnapshot.forEach(cardDoc => {
+                        const cardData = cardDoc.data();
+                        // Define 'mastered' as interval > 21 days
+                        if (cardData.interval && cardData.interval > 21) {
+                            masteredCount++;
+                        }
+                    });
+                }
+
+                 // Define achievements with tiers
+                const achievements = [
+                    { name: 'Deck Starter', goal: 1, value: decks.length, icon: '🚀' },
+                    { name: 'Review Rookie', goal: 10, value: profileData.totalReviews, icon: '⭐' },
+                    { name: 'Consistent Learner', value: profileData.streak, icon: '🔥', 
+                      tiers: [
+                        { name: 'Bronze', goal: 7, color: 'bg-orange-400' },
+                        { name: 'Silver', goal: 30, color: 'bg-gray-400' },
+                        { name: 'Gold', goal: 100, color: 'bg-yellow-400' },
+                        { name: 'Diamond', goal: 365, color: 'bg-blue-400' }
+                      ]
+                    },
+                    { name: 'Review Regular', value: profileData.totalReviews, icon: '🌟',
+                      tiers: [
+                        { name: 'Bronze', goal: 100, color: 'bg-orange-400' },
+                        { name: 'Silver', goal: 500, color: 'bg-gray-400' },
+                        { name: 'Gold', goal: 2500, color: 'bg-yellow-400' },
+                        { name: 'Diamond', goal: 10000, color: 'bg-blue-400' }
+                      ]
+                    },
+                    { name: 'Master Learner', value: masteredCount, icon: '🧠',
+                      tiers: [
+                        { name: 'Bronze', goal: 50, color: 'bg-orange-400' },
+                        { name: 'Silver', goal: 150, color: 'bg-gray-400' },
+                        { name: 'Gold', goal: 300, color: 'bg-yellow-400' },
+                        { name: 'Diamond', goal: 500, color: 'bg-blue-400' }
+                      ]
+                    }
+                ];
+                
+                const user = auth.currentUser;
+                const photoURL = user.photoURL || `https://ui-avatars.com/api/?name=${user.displayName || 'User'}&background=random`;
+
+                profileView.innerHTML = `
+                    <header class="mb-8">
+                        <div class="relative flex items-center justify-center">
+                             <button id="back-to-folders-profile" class="absolute left-0 text-indigo-600 hover:underline">&larr; Back to Dashboard</button>
+                             <h1 class="text-2xl sm:text-3xl lg:text-4xl font-bold text-indigo-600 text-center">My Progress</h1>
+                        </div>
+                    </header>
+                    <div class="space-y-8">
+                        <!-- Profile Card & Stats -->
+                         <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+                             <div class="md:col-span-1 bg-white p-6 rounded-2xl shadow-lg flex flex-col items-center justify-center">
+                                 <img src="${photoURL}" alt="Profile Picture" class="w-24 h-24 rounded-full mb-4 border-4 border-indigo-500">
+                                 <h2 class="text-xl font-bold text-center">${user.displayName || 'Anonymous User'}</h2>
+                             </div>
+                             <div class="md:col-span-3 grid grid-cols-1 sm:grid-cols-3 gap-6 text-center">
+                                 <div class="bg-white p-6 rounded-2xl shadow-lg">
+                                     <div class="text-5xl">🔥</div>
+                                     <div class="text-3xl font-bold mt-2">${profileData.streak}</div>
+                                     <div class="text-gray-500">Day Streak</div>
+                                 </div>
+                                 <div class="bg-white p-6 rounded-2xl shadow-lg">
+                                     <div class="text-5xl">🧠</div>
+                                     <div class="text-3xl font-bold mt-2">${masteredCount}</div>
+                                     <div class="text-gray-500">Cards Mastered</div>
+                                 </div>
+                                 <div class="bg-white p-6 rounded-2xl shadow-lg">
+                                     <div class="text-5xl">⏰</div>
+                                     <div class="text-3xl font-bold mt-2">${formatStudyTime(profileData.totalStudyTime)}</div>
+                                     <div class="text-gray-500">Time Studied</div>
+                                 </div>
+                             </div>
+                         </div>
+                        
+                        <!-- Achievements Section -->
+                        <div>
+                            <h3 class="text-2xl font-semibold mb-4">Achievements</h3>
+                            <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                                ${achievements.map(getAchievementHTML).join('')}
+                            </div>
+                        </div>
+                    </div>
+                `;
+
+                document.getElementById('back-to-folders-profile').addEventListener('click', showFolderView);
+
+            } catch(error) {
+                console.error("Error rendering profile view:", error);
+                profileView.innerHTML = `<p class="text-center text-red-500">Could not load your profile. Please try again later.</p>`;
+            }
+        }
+        
+        function getAchievementHTML(ach) {
+            if (ach.tiers) {
+                let currentTier = null;
+                let nextTier = ach.tiers[0];
+                for (let i = ach.tiers.length - 1; i >= 0; i--) {
+                    if (ach.value >= ach.tiers[i].goal) {
+                        currentTier = ach.tiers[i];
+                        nextTier = ach.tiers[i + 1] || null;
+                        break;
+                    }
+                }
+                
+                const progress = nextTier ? Math.min(100, (ach.value / nextTier.goal) * 100) : 100;
+                const progressWidth = currentTier ? (nextTier ? progress : 100) : (ach.value / nextTier.goal * 100);
+
+
+                return `
+                    <div class="bg-white p-4 rounded-2xl shadow-lg text-center ${currentTier ? '' : 'opacity-60'}">
+                        <div class="text-4xl">${ach.icon}</div>
+                        <div class="font-semibold mt-2">${ach.name}</div>
+                        ${currentTier ? `
+                            <div class="text-xs font-bold text-white ${currentTier.color} rounded-full px-2 py-0.5 inline-block mt-1">${currentTier.name}</div>
+                        ` : '<div class="h-5 mt-1"></div>'}
+                        <div class="w-full bg-gray-200 rounded-full h-2.5 mt-2">
+                            <div class="${currentTier ? currentTier.color : 'bg-gray-400'} h-2.5 rounded-full" style="width: ${progressWidth}%"></div>
+                        </div>
+                        <div class="text-xs text-gray-500 mt-1">${ach.value}/${nextTier ? nextTier.goal : (currentTier ? currentTier.goal : ach.tiers[0].goal)}</div>
+                    </div>
+                `;
+
+            } else { // Single-goal achievements
+                const progress = Math.min(100, (ach.value / ach.goal) * 100);
+                return `
+                     <div class="bg-white p-4 rounded-2xl shadow-lg text-center ${ach.value >= ach.goal ? '' : 'opacity-60'}">
+                         <div class="text-4xl">${ach.icon}</div>
+                         <div class="font-semibold mt-2">${ach.name}</div>
+                         <div class="h-5 mt-1"></div>
+                         <div class="w-full bg-gray-200 rounded-full h-2.5 mt-2">
+                            <div class="bg-green-500 h-2.5 rounded-full" style="width: ${progress}%"></div>
+                         </div>
+                         <div class="text-xs text-gray-500 mt-1">${ach.value}/${ach.goal}</div>
+                     </div>
+                `;
+            }
+        }
+
+
+        // --- HTML TEMPLATES ---
+        const getFolderHTML = (folder, isPublicView = false) => {
+            const ownerUID = 'rQAEiO6Nj3XM6kn7HpaL45ok6ki2';
+            const isOwner = currentUserId === ownerUID;
+
+            const showMenu = !isPublicView || (isPublicView && isOwner);
+
+            return `
+                <div data-folder-id="${folder.id}" data-is-public="${isPublicView}" class="bg-white p-4 rounded-2xl shadow-lg cursor-pointer flex flex-col items-center justify-center aspect-square hover:shadow-xl transition-shadow relative">
+                    ${isPublicView ? `<span class="absolute top-2 left-2 bg-blue-500 text-white text-xs font-bold px-2 py-1 rounded-full z-10">PUBLIC</span>` : ''}
+                    
+                    ${showMenu ? `
+                    <div class="absolute top-2 right-2 z-20">
+                        <button data-menu-btn="folder-${folder.id}" class="text-gray-400 hover:text-gray-600 p-1 rounded-full focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01" /></svg>
+                        </button>
+                        <div id="folder-${folder.id}-menu" class="action-menu absolute right-0 mt-2 w-56 bg-white rounded-md shadow-lg z-10 hidden">
+                            ${isPublicView && isOwner ? `
+                                <a href="#" data-delete-public-folder="${folder.id}" class="flex items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                    <span>Delete Public Copy</span>
+                                </a>
+                            ` : ''}
+
+                            ${!isPublicView ? `
+                                ${isOwner && !folder.isPublic ? `
+                                <a href="#" data-make-public-folder="${folder.id}" class="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM4.332 8.027a6.012 6.012 0 011.912-2.706C6.512 5.72 7 7.92 7 9c0 1.08.488 3.28 1.812 3.679a6.012 6.012 0 01-4.49-4.652zM10 14.5c-1.336 0-2.678-.56-3.64-1.558a5.987 5.987 0 01-1.4-1.872A6.012 6.012 0 0110 4.5c1.336 0 2.678.56 3.64 1.558a5.987 5.987 0 011.4 1.872A6.012 6.012 0 0110 14.5z" clip-rule="evenodd" /></svg>
+                                    <span>Make Public</span>
+                                </a>` : ''}
+                                <a href="#" data-edit-folder="${folder.id}" class="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                                    <span>Edit Name</span>
+                                </a>
+                                <a href="#" data-delete-folder="${folder.id}" class="flex items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                    <span>Delete Folder</span>
+                                </a>
+                            ` : ''}
+                        </div>
+                    </div>
+                    ` : ''}
+
+                    <svg class="w-16 h-16 text-yellow-400 pointer-events-none" fill="currentColor" viewBox="0 0 20 20"><path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"></path></svg>
+                    <h3 class="mt-2 text-lg font-semibold text-center pointer-events-none">${folder.name}</h3>
+                </div>`;
+        }
+
+        const getDeckHTML = (deck, isPublicView = false) => `
+            <div class="bg-white rounded-2xl shadow-lg flex flex-col aspect-square hover:shadow-xl transition-shadow relative overflow-hidden">
+                 <div data-deck-id="${deck.id}" data-is-public="${isPublicView}" class="p-4 flex-grow flex flex-col items-center justify-center cursor-pointer">
+                    ${isPublicView ? `<span class="absolute top-2 left-2 bg-blue-500 text-white text-xs font-bold px-2 py-1 rounded-full z-10">PUBLIC</span>` : ''}
+                    <svg class="w-16 h-16 text-indigo-500 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+                    <h3 class="mt-2 text-lg font-semibold text-center pointer-events-none">${deck.name}</h3>
+                 </div>
+                 <div class="absolute top-2 right-2 z-20">
+                    <button data-menu-btn="deck-${deck.id}" class="text-gray-400 hover:text-gray-600 p-1 rounded-full focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01" /></svg>
+                    </button>
+                    <div id="deck-${deck.id}-menu" class="action-menu absolute right-0 mt-2 w-40 bg-white rounded-md shadow-lg z-10 hidden">
+                        <a href="#" data-quiz-deck="${deck.id}" class="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-t-md">
+                             <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-3a1 1 0 00-.867.5 1 1 0 11-1.731-1A3 3 0 0113 8a3.001 3.001 0 01-2 2.83V11a1 1 0 11-2 0v-1a1 1 0 011-1 1 1 0 100-2zm0 8a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd" /></svg>
+                            <span>Quiz Deck</span>
+                        </a>
+                        ${!isPublicView ? `
+                        <a href="#" data-edit-deck="${deck.id}" class="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+                            <span>Edit</span>
+                        </a>
+                        <a href="#" data-delete-deck="${deck.id}" class="flex items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50 rounded-b-md">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                            <span>Delete</span>
+                        </a>
+                        ` : ''}
+                    </div>
+                </div>
+            </div>`;
+        const getAddItemHTML = (type) => `<div id="add-${type}-btn" class="border-2 border-dashed border-gray-300 p-4 rounded-2xl cursor-pointer flex flex-col items-center justify-center aspect-square hover:bg-gray-50 transition-colors"><svg class="w-12 h-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg><h3 class="mt-2 text-lg font-medium text-gray-500">Add New ${type}</h3></div>`;
+        
+        function getFlashcardLayoutHTML(isPublic = false, isStudyNow = false) {
+            return `
+                <div class="flex justify-center w-full gap-4 flex-grow">
+                     <button id="prev-btn" class="p-3 bg-white rounded-full shadow-md hover:bg-gray-200 flex-shrink-0 self-center"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-gray-700"><path d="m15 18-6-6 6-6"/></svg></button>
+
+                    <div class="w-full flex flex-col items-center flex-grow">
+                        <div id="card-container" class="card-container w-full flex-grow rounded-2xl shadow-lg relative ${isPublic ? 'cursor-pointer' : ''}">
+                            <div id="card-inner" class="card-inner">
+                                <div class="card-face card-front bg-gray-200 border-4 border-gray-300 rounded-2xl">
+                                     <div id="swipe-overlay-left" class="swipe-overlay bg-red-500/70">AGAIN</div>
+                                     <div id="swipe-overlay-right" class="swipe-overlay bg-green-500/70">EASY</div>
+                                    <p id="card-front-text" class="text-xl sm:text-2xl lg:text-3xl font-medium max-h-full text-gray-800"></p>
+                                </div>
+                                <div class="card-face card-back bg-blue-200 text-blue-900 border-4 border-blue-300 rounded-2xl">
+                                    <p id="card-back-text" class="text-xl sm:text-2xl lg:text-3xl font-medium max-h-full"></p>
+                                    <div class="absolute bottom-4 left-4 right-4 flex justify-center gap-2">
+                                        <button id="explain-btn" class="bg-blue-300 hover:bg-blue-400 text-blue-900 font-semibold py-2 px-4 rounded-full flex items-center gap-2 transition">
+                                            <span class="spinner hidden"></span>
+                                            <span>✨ Explain</span>
+                                        </button>
+                                        <button id="mnemonic-btn" class="bg-blue-300 hover:bg-blue-400 text-blue-900 font-semibold py-2 px-4 rounded-full flex items-center gap-2 transition">
+                                            <span class="spinner hidden"></span>
+                                            <span>✨ Mnemonic</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                             ${!isPublic && !isStudyNow ? `
+                             <div class="absolute top-2 right-2 z-20">
+                                 <button id="card-menu-btn" class="text-gray-500 hover:text-gray-800 p-2 rounded-full">
+                                     <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01" /></svg>
+                                 </button>
+                                 <div id="card-menu" class="action-menu absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg z-10 hidden">
+                                     <a href="#" id="edit-card-btn" class="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                                         <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                                         <span>Edit Card</span>
+                                     </a>
+                                     <a href="#" id="delete-card-btn" class="flex items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50">
+                                         <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                         <span>Delete Card</span>
+                                     </a>
+                                 </div>
+                             </div>
+                             ` : ''}
+                        </div>
+                        
+                        <div class="w-full mt-auto pt-4 flex-shrink-0">
+                            <div id="card-counter" class="text-lg font-semibold text-gray-600 text-center mb-4"></div>
+                            <div id="controls" class="flex items-center justify-center w-full">
+                                <div class="text-center">
+                                    <div id="rating-controls" class="grid grid-cols-2 md:grid-cols-4 gap-2">
+                                        <button data-rating="again" class="rating-btn bg-red-500 hover:bg-red-600 text-white font-semibold py-2 px-4 rounded-lg">Again</button>
+                                        <button data-rating="hard" class="rating-btn bg-orange-500 hover:bg-orange-600 text-white font-semibold py-2 px-4 rounded-lg">Hard</button>
+                                        <button data-rating="good" class="rating-btn bg-blue-500 hover:bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg">Good</button>
+                                        <button data-rating="easy" class="rating-btn bg-green-500 hover:bg-green-600 text-white font-semibold py-2 px-4 rounded-lg">Easy</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+                     <button id="next-btn" class="p-3 bg-white rounded-full shadow-md hover:bg-gray-200 flex-shrink-0 self-center"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-gray-700"><path d="m9 18 6-6-6-6"/></svg></button>
+                </div>
+            `;
+        }
+        
+        function getCalendarModalHTML() {
+            return `
+                 <div class="max-h-[80vh] flex flex-col">
+                     <div class="flex justify-between items-center mb-4">
+                         <button id="prev-month" class="p-2 rounded-full hover:bg-gray-200">&larr;</button>
+                         <h2 id="month-year" class="text-xl font-bold"></h2>
+                         <button id="next-month" class="p-2 rounded-full hover:bg-gray-200">&rarr;</button>
+                     </div>
+                     <div class="grid grid-cols-7 gap-2 text-center font-semibold text-gray-600 mb-2">
+                         <div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div>
+                     </div>
+                     <div id="calendar-body" class="grid grid-cols-7 gap-2">
+                         <!-- Calendar days will be rendered here -->
+                     </div>
+                     <div class="flex justify-end mt-6">
+                         <button id="close-calendar-modal" class="bg-gray-200 py-2 px-4 rounded-lg">Close</button>
+                     </div>
+                 </div>
+            `;
+        }
+        
+        function getSettingsModalHTML() {
+            return `
+                <h2 class="text-2xl font-semibold mb-4">Settings</h2>
+                <div class="space-y-4">
+                    <p class="text-gray-600">SRS algorithm customization options will be available here in a future update.</p>
+                    <!-- Example placeholder for a setting -->
+                    <div class="flex justify-between items-center">
+                        <label for="ease-factor" class="text-gray-700">Ease Factor Multiplier</label>
+                        <input type="range" id="ease-factor" name="ease-factor" min="1.3" max="3.5" value="2.5" step="0.1" class="w-1/2" disabled>
+                        <span class="text-gray-500">2.5</span>
+                    </div>
+                </div>
+                <div class="flex justify-end mt-6">
+                    <button id="close-settings-modal" class="bg-gray-200 py-2 px-4 rounded-lg">Close</button>
+                </div>
+            `;
+        }
+
+        function getAddDeckModalHTML() {
+            return `
+                <div class="space-y-6">
+                    <div>
+                        <h2 class="text-2xl font-semibold mb-2">Create Deck Manually</h2>
+                        <div class="flex gap-2">
+                            <input type="text" id="new-deck-name" placeholder="New Deck Name" class="w-full p-3 border border-gray-300 rounded-lg">
+                            <button id="confirm-add-deck" class="bg-indigo-500 text-white font-semibold py-3 px-4 rounded-lg hover:bg-indigo-600">Create</button>
+                        </div>
+                    </div>
+                    <hr>
+                    <div>
+                        <h2 class="text-2xl font-semibold mb-2">✨ Import from PDF</h2>
+                        <p class="text-gray-600 text-sm mb-4">Let Gemini automatically create flashcards from your PDF file.</p>
+                        <input type="text" id="pdf-deck-name" placeholder="New Deck Name from PDF" class="w-full p-3 border border-gray-300 rounded-lg mb-4">
+                        <input type="file" id="pdf-file" accept=".pdf" class="w-full p-2 border border-gray-300 rounded-lg text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100">
+                         <button id="generate-cards-btn" class="mt-4 w-full bg-green-600 text-white font-semibold py-3 px-4 rounded-lg hover:bg-green-700 flex items-center justify-center gap-2">
+                             <span id="generate-btn-text">Generate Flashcards</span>
+                             <div class="spinner spinner-light hidden"></div>
+                         </button>
+                    </div>
+                    <div class="flex justify-end">
+                        <button id="cancel-modal" class="bg-gray-200 py-2 px-4 rounded-lg">Close</button>
+                    </div>
+                </div>
+            `;
+        }
+    </script>
+    <script>
+        // Canvas animation script
+        const canvas = document.getElementById('stars-canvas');
+        if (canvas) {
+            const ctx = canvas.getContext('2d');
+            let stars = [], numStars = 200;
+            const setCanvasSize = () => { if(canvas) { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }};
+            class Star { constructor() { this.x = Math.random() * canvas.width; this.y = Math.random() * canvas.height; this.radius = Math.random() * 1.5; this.vx = (Math.random() - 0.5) * 0.4; this.vy = (Math.random() - 0.5) * 0.4; this.opacity = 0.5 + Math.random() * 0.5; } draw() { ctx.beginPath(); ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2); ctx.fillStyle = `rgba(79, 70, 229, ${this.opacity})`; ctx.fill(); } update() { this.x += this.vx; this.y += this.vy; if (this.x < 0 || this.x > canvas.width) this.vx = -this.vx; if (this.y < 0 || this.y > canvas.height) this.vy = -this.vy; } }
+            const init = () => { stars = []; for (let i = 0; i < numStars; i++) stars.push(new Star()); };
+            function animate() { const el = document.getElementById('auth-screen'); if (!el || el.classList.contains('hidden')) return; ctx.clearRect(0, 0, canvas.width, canvas.height); stars.forEach(s => { s.update(); s.draw(); }); requestAnimationFrame(animate); }
+            window.addEventListener('resize', () => { setCanvasSize(); init(); });
+            setCanvasSize(); init(); animate();
+        }
+    </script>
+</body>
+</html>
+
+
